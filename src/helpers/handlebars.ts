@@ -78,6 +78,19 @@ export function registerHelpers(): void {
   Handlebars.registerHelper('hasRequestBody', (op: Operation) => !!op.requestBody);
   Handlebars.registerHelper('hasPathParams', (op: Operation) => op.pathParams.length > 0);
   Handlebars.registerHelper('isEventStream', (op: Operation) => !!op.isEventStream);
+  Handlebars.registerHelper('sseEventType', (op: Operation) =>
+    new Handlebars.SafeString(op.eventSchema ?? 'Record<string, unknown>'),
+  );
+  Handlebars.registerHelper('needsRequestHeaders', (op: Operation) => {
+    if (op.headerParams.length > 0) return true;
+    if (op.cookieParams && op.cookieParams.length > 0) return true;
+    if (
+      op.requestBody &&
+      op.requestBody.contentType !== 'application/json' &&
+      op.requestBody.contentType !== 'multipart/form-data'
+    ) return true;
+    return false;
+  });
 
   Handlebars.registerHelper('sseMethodSignature', (op: Operation) =>
     new Handlebars.SafeString(buildSSEMethodSignature(op)),
@@ -113,7 +126,7 @@ function buildParamStrings(op: Operation): string[] {
     params.push(`input${opt}: ${op.requestBody.type}`);
   }
   if (op.queryType) params.push(`query?: ${op.queryType}`);
-  if (op.headerParams.length > 0 && op.headerType) params.push(`headers?: ${op.headerType}`);
+  if (op.headerParams.length > 0 && op.headerType) params.push(`headerOptions?: ${op.headerType}`);
   if (op.cookieParams && op.cookieParams.length > 0 && op.cookieType) params.push(`cookies?: ${op.cookieType}`);
   return params;
 }
@@ -138,7 +151,7 @@ export function buildMethodArgList(op: Operation): string {
   for (const p of op.pathParams) args.push(p.name);
   if (op.requestBody) args.push('input');
   if (op.queryType) args.push('query');
-  if (op.headerParams.length > 0 && op.headerType) args.push('headers');
+  if (op.headerParams.length > 0 && op.headerType) args.push('headerOptions');
   if (op.cookieParams && op.cookieParams.length > 0 && op.cookieType) args.push('cookies');
   return args.join(', ');
 }
