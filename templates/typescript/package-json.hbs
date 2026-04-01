@@ -1,0 +1,29 @@
+{
+  "name": "{{packageName}}",
+  "version": "{{version}}",
+  "type": "module",
+  "description": "{{#if description}}{{description}}{{else}}TypeScript SDK for {{title}}{{/if}}",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "tsc"
+  },
+  "dependencies": {
+    "axios": "1.14.0"{{#each externalPackages}},
+    "{{name}}": "{{version}}"{{/each}}
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ]
+}

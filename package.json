@@ -1,0 +1,58 @@
+{
+  "name": "@apollo-deploy/tesseract",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Manifest-first SDK generator — turns sdk-manifold/v1 manifests into production-ready TypeScript SDKs",
+  "bin": {
+    "tesseract": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "templates/"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Apollo-Deploy/sdk-generator.git"
+  },
+  "keywords": [
+    "sdk",
+    "codegen",
+    "manifest",
+    "typescript",
+    "cli",
+    "api",
+    "tesseract"
+  ],
+  "engines": {
+    "node": ">=18",
+    "bun": ">=1.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "bun src/cli.ts",
+    "prepublishOnly": "bun run build"
+  },
+  "dependencies": {
+    "change-case": "^5.4.4",
+    "commander": "^12.1.0",
+    "handlebars": "^4.7.8",
+    "prettier": "^3.3.0",
+    "ts-morph": "^27.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0"
+  }
+}
