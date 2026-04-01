@@ -6,7 +6,7 @@
 import { resolve } from 'node:path';
 import { intake } from './pipeline/intake.js';
 import { enrich } from './pipeline/enrich.js';
-import { write } from './pipeline/write.js';
+import { compare, write } from './pipeline/write.js';
 import { resolveConfig } from './types/config.js';
 import { TypeScriptAdapter } from './adapters/typescript/index.js';
 import type { TesseractConfig } from './types/config.js';
@@ -16,6 +16,9 @@ export interface GenerateResult {
   filesWritten: number;
   filesSkipped: number;
   warnings: string[];
+  hasChanges: boolean;
+  mode: 'write' | 'dry-run' | 'check';
+  changedFiles: string[];
 }
 
 const adapters: Record<string, () => LanguageAdapter> = {
@@ -40,6 +43,19 @@ export async function generate(config: TesseractConfig): Promise<GenerateResult>
   const outputDir = resolve(resolved.output);
   const emitResult = await adapter.emit(enriched, outputDir);
 
+  if (resolved.dryRun || resolved.check) {
+    const compareResult = compare(emitResult.files, outputDir);
+
+    return {
+      filesWritten: compareResult.written.length,
+      filesSkipped: compareResult.skipped.length,
+      warnings: emitResult.warnings,
+      hasChanges: compareResult.written.length > 0,
+      mode: resolved.check ? 'check' : 'dry-run',
+      changedFiles: compareResult.written,
+    };
+  }
+
   // 4. Write: files → disk
   const writeResult = write(emitResult.files, outputDir);
 
@@ -47,6 +63,9 @@ export async function generate(config: TesseractConfig): Promise<GenerateResult>
     filesWritten: writeResult.written.length,
     filesSkipped: writeResult.skipped.length,
     warnings: emitResult.warnings,
+    hasChanges: writeResult.written.length > 0,
+    mode: 'write',
+    changedFiles: writeResult.written,
   };
 }
 

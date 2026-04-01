@@ -17,6 +17,8 @@ export interface SDKIR {
 export interface SDKMeta {
   title: string;
   version: string;
+  /** Explicit package version override. When undefined the TypeScript adapter auto-resolves from npm and bumps the patch. */
+  packageVersion?: string;
   description?: string;
   baseUrl: string;
   packageName: string;

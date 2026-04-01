@@ -104,8 +104,16 @@ export class TypeScriptAdapter implements LanguageAdapter {
         schemas: enriched.schemas,
         hasSSE,
       }));
+    const resolvedPackageVersion = enriched.meta.packageVersion
+      ? enriched.meta.packageVersion
+      : await resolveNpmPackageVersion(enriched.meta.packageName, enriched.meta.version, warnings);
+
     tryEmit(files, warnings, 'package.json', () =>
-      getTemplate('typescript', 'package-json')({ ...enriched.meta, externalPackages }));
+      getTemplate('typescript', 'package-json')({
+        ...enriched.meta,
+        packageVersion: resolvedPackageVersion,
+        externalPackages,
+      }));
     tryEmit(files, warnings, 'tsconfig.json', () =>
       getTemplate('typescript', 'tsconfig')({}));
     tryEmit(files, warnings, 'README.md', () =>
@@ -142,4 +150,66 @@ function tryEmit(
   } catch (err) {
     warnings.push(`${relativePath}: ${err instanceof Error ? err.message : String(err)}`);
   }
+}
+
+// ── Adapter-level npm version resolution ─────────────────────────────────────
+
+/**
+ * Queries the npm registry for the latest published version of the package,
+ * then returns a patch-bumped version string.
+ *
+ * - If the package has never been published (404), returns `fallback` unchanged.
+ * - If the registry is unreachable or returns an error, emits a warning and
+ *   returns `fallback` unchanged.
+ */
+async function resolveNpmPackageVersion(
+  packageName: string,
+  fallback: string,
+  warnings: string[],
+): Promise<string> {
+  try {
+    const url = `https://registry.npmjs.org/${encodeURIComponent(packageName)}/latest`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(8_000) });
+
+    if (res.status === 404) {
+      // Package not yet published — first release, keep the manifest version.
+      return fallback;
+    }
+
+    if (!res.ok) {
+      warnings.push(
+        `npm registry returned ${res.status} for "${packageName}"; using manifest version "${fallback}".`,
+      );
+      return fallback;
+    }
+
+    const data = (await res.json()) as { version?: string };
+    if (!data.version) return fallback;
+
+    return bumpPatch(data.version);
+  } catch (err) {
+    warnings.push(
+      `Could not reach npm registry for "${packageName}": ${
+        err instanceof Error ? err.message : String(err)
+      }. Using manifest version "${fallback}".`,
+    );
+    return fallback;
+  }
+}
+
+/**
+ * Increments the patch segment of a semver string.
+ * Pre-release / build metadata suffixes are stripped before bumping.
+ * Returns the original string unchanged if it cannot be parsed.
+ *
+ * Examples: 1.2.3 → 1.2.4 | 1.2.3-alpha.1 → 1.2.4
+ */
+function bumpPatch(version: string): string {
+  // Strip pre-release and build-metadata suffixes
+  const base = version.split('-')[0].split('+')[0];
+  const parts = base.split('.');
+  if (parts.length !== 3) return version;
+  const patch = parseInt(parts[2], 10);
+  if (isNaN(patch)) return version;
+  return `${parts[0]}.${parts[1]}.${patch + 1}`;
 }

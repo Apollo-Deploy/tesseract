@@ -16,6 +16,8 @@ export interface TesseractConfig {
 
   /** Override the npm package name */
   packageName?: string;
+  /** Override the generated package version */
+  packageVersion?: string;
   /** Override the client class name */
   clientName?: string;
   /** Override the base URL */
@@ -43,6 +45,7 @@ export interface ResolvedConfig {
   readonly output: string;
   readonly language: TargetLanguage;
   readonly packageName?: string;
+  readonly packageVersion?: string;
   readonly clientName?: string;
   readonly baseUrl?: string;
   readonly dryRun: boolean;
@@ -60,6 +63,7 @@ export function resolveConfig(config: TesseractConfig): ResolvedConfig {
     output: config.output,
     language: config.language ?? 'typescript',
     packageName: config.packageName,
+    packageVersion: config.packageVersion,
     clientName: config.clientName,
     baseUrl: config.baseUrl,
     dryRun: config.dryRun ?? false,

@@ -31,8 +31,11 @@ tesseract generate [options]
 | `-i, --input <path>` | Yes | Path to the `sdk-manifold/v1` manifest JSON file |
 | `-o, --output <dir>` | Yes | Output directory for the generated SDK |
 | `-n, --name <name>` | No | Override the npm package name |
+| `--package-version <version>` | No | Override the generated package version |
 | `--client-name <name>` | No | Override the generated client class name |
 | `--base-url <url>` | No | Override the default base URL |
+| `--dry-run` | No | Preview changes without writing files |
+| `--check` | No | Exit non-zero if generated output is out of date |
 
 ## Input: The Manifest
 
@@ -206,6 +209,7 @@ await generate({
   output: './sdk',
   language: 'typescript',
   packageName: '@my-org/api-sdk',
+  packageVersion: '1.2.3',
   clientName: 'MyApi',
   baseUrl: 'https://api.example.com',
 });
@@ -219,6 +223,7 @@ await generate({
 | `output` | `string` | Output directory |
 | `language` | `'typescript'` | Target language |
 | `packageName` | `string?` | Override npm package name |
+| `packageVersion` | `string?` | Override generated package version; defaults to `info.version` from the manifest |
 | `clientName` | `string?` | Override client class name |
 | `baseUrl` | `string?` | Override default base URL |
 | `environments` | `{ name: string; baseUrl: string }[]?` | Named environment presets |

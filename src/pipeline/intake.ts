@@ -90,6 +90,9 @@ export function intake(config: ResolvedConfig): SDKIR {
   const meta: SDKMeta = {
     title: manifest.info.title,
     version: manifest.info.version,
+    // Only set packageVersion when the caller explicitly supplied it.
+    // When undefined the TypeScript adapter queries npm and bumps the patch.
+    packageVersion: config.packageVersion,
     description: manifest.info.description,
     baseUrl: config.baseUrl ?? manifest.info.baseUrl ?? 'http://localhost',
     packageName: config.packageName ?? kebabCase(manifest.info.title).toLowerCase(),
