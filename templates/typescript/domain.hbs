@@ -40,8 +40,64 @@ export function {{factoryName}}(transport: SDKTransport): {{interfaceName}} {
 {{#each operations}}
 {{#if (isEventStream this)}}
     {{name}}{{{sseMethodParams this}}}: AsyncIterable<SSEEvent<{{{sseEventType this}}}>> {
-      const url = new URL(`{{path}}`, transport.config.baseUrl).toString();
-      return createSSEStream<{{{sseEventType this}}}>(url, { method: '{{httpMethod}}' }, undefined, options);
+      const sseUrl = new URL(`{{path}}`, transport.config.baseUrl);
+{{#if (hasQueryParams this)}}
+      if (query) {
+{{#each queryParams}}
+        if (query.{{name}} !== undefined && query.{{name}} !== null) {
+          sseUrl.searchParams.set('{{originalName}}', String(query.{{name}}));
+        }
+{{/each}}
+      }
+{{else if queryType}}
+      if (query) {
+        for (const [k, v] of Object.entries(query)) {
+          if (v !== undefined && v !== null) sseUrl.searchParams.set(k, String(v));
+        }
+      }
+{{/if}}
+{{#if (or (hasRequestBody this) (needsRequestHeaders this))}}
+      const sseHeaders: Record<string, string> = {};
+{{#if (hasRequestBody this)}}
+      sseHeaders['Content-Type'] = '{{requestBody.contentType}}';
+{{/if}}
+{{#if headerParams.length}}
+      if (headerOptions) {
+{{#each headerParams}}
+        if (headerOptions.{{name}} !== undefined && headerOptions.{{name}} !== null) {
+          sseHeaders['{{originalName}}'] = String(headerOptions.{{name}});
+        }
+{{/each}}
+      }
+{{/if}}
+{{#if cookieParams}}
+      if (cookies) {
+        const cookiePairs: string[] = [];
+{{#each cookieParams}}
+        if (cookies.{{name}} !== undefined && cookies.{{name}} !== null) {
+          cookiePairs.push(`{{originalName}}=${encodeURIComponent(String(cookies.{{name}}))}`);
+        }
+{{/each}}
+        if (cookiePairs.length > 0) {
+          sseHeaders.Cookie = cookiePairs.join('; ');
+        }
+      }
+{{/if}}
+{{/if}}
+      return createSSEStream<{{{sseEventType this}}}>(
+        sseUrl.toString(),
+        {
+          method: '{{httpMethod}}',
+{{#if (hasRequestBody this)}}
+          body: JSON.stringify(input),
+{{/if}}
+{{#if (or (hasRequestBody this) (needsRequestHeaders this))}}
+          headers: Object.keys(sseHeaders).length > 0 ? sseHeaders : undefined,
+{{/if}}
+        },
+        undefined,
+        options,
+      );
     },
 
 {{else}}

@@ -471,6 +471,16 @@ function buildOperation(
     }
   }
 
+  // Header type (inline object type from headerParams)
+  let headerType: string | undefined;
+  if (headerParams.length > 0) {
+    const props = headerParams.map((p) => {
+      const opt = p.required ? '' : '?';
+      return `${p.name}${opt}: ${p.type}`;
+    });
+    headerType = `{ ${props.join('; ')} }`;
+  }
+
   return {
     operation: {
       name,
@@ -478,11 +488,12 @@ function buildOperation(
       summary: route.schema?.summary,
       description: route.schema?.description ?? route.sdk?.description,
       httpMethod,
-      path: fastifyPathToIR(route.url),
+      path: fastifyPathToIR(route.url, pathParams),
       pathParams,
       queryParams,
       queryType,
       headerParams,
+      headerType,
       requestBody,
       responseType,
       statusCode,
@@ -495,6 +506,25 @@ function buildOperation(
 
 // ── Parameter extraction ─────────────────────────────────────────────────────
 
+const TS_RESERVED_WORDS = new Set([
+  'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default',
+  'delete', 'do', 'else', 'enum', 'export', 'extends', 'false', 'finally',
+  'for', 'function', 'if', 'import', 'in', 'instanceof', 'new', 'null',
+  'return', 'super', 'switch', 'this', 'throw', 'true', 'try', 'typeof',
+  'var', 'void', 'while', 'with', 'as', 'implements', 'interface', 'let',
+  'package', 'private', 'protected', 'public', 'static', 'yield', 'type',
+]);
+
+/** Parameter names reserved by the generated method signatures. */
+const FIXED_PARAM_NAMES = new Set(['input', 'query', 'headerOptions', 'cookies', 'options']);
+
+function safeParamName(name: string): string {
+  if (TS_RESERVED_WORDS.has(name) || FIXED_PARAM_NAMES.has(name)) {
+    return `${name}Param`;
+  }
+  return name;
+}
+
 function extractPathParams(url: string, paramsSchema?: JsonSchema): Parameter[] {
   const urlParams = [...url.matchAll(/:([a-zA-Z_][a-zA-Z0-9_]*)/g)].map((m) => m[1]);
   if (urlParams.length === 0) return [];
@@ -506,7 +536,7 @@ function extractPathParams(url: string, paramsSchema?: JsonSchema): Parameter[] 
   return urlParams.map((paramName) => {
     const propSchema = props?.[paramName];
     return {
-      name: camelCase(paramName),
+      name: safeParamName(camelCase(paramName)),
       originalName: paramName,
       type: propSchema ? jsonSchemaToType(propSchema) : 'string',
       required: required.size === 0 || required.has(paramName),
@@ -565,8 +595,12 @@ function extractHeaderParams(headersSchema?: JsonSchema): Parameter[] {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function fastifyPathToIR(url: string): string {
-  return url.replace(/:([a-zA-Z_][a-zA-Z0-9_]*)/g, '${$1}');
+function fastifyPathToIR(url: string, pathParams: Parameter[]): string {
+  const nameMap = new Map(pathParams.map((p) => [p.originalName, p.name]));
+  return url.replace(/:([a-zA-Z_][a-zA-Z0-9_]*)/g, (_, raw) => {
+    const name = nameMap.get(raw) ?? raw;
+    return '${' + name + '}';
+  });
 }
 
 function pickSuccessResponse(

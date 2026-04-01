@@ -82,8 +82,8 @@ export function registerHelpers(): void {
     new Handlebars.SafeString(op.eventSchema ?? 'Record<string, unknown>'),
   );
   Handlebars.registerHelper('needsRequestHeaders', (op: Operation) => {
-    if (op.headerParams.length > 0) return true;
-    if (op.cookieParams && op.cookieParams.length > 0) return true;
+    if (op.headerParams.length > 0 && op.headerType) return true;
+    if (op.cookieParams && op.cookieParams.length > 0 && op.cookieType) return true;
     if (
       op.requestBody &&
       op.requestBody.contentType !== 'application/json' &&
@@ -205,7 +205,7 @@ function addTypeImport(type: string, schemaNames: Set<string>, imports: Set<stri
     return;
   }
   const cleaned = type.replace(/\[\]$/, '').replace(/ \| null$/, '').replace(/^\(/, '').replace(/\)$/, '');
-  for (const part of cleaned.split(/\s*\|\s*/)) {
+  for (const part of cleaned.split(/\s*[|&]\s*/)) {
     const trimmed = part.trim();
     if (schemaNames.has(trimmed)) imports.add(trimmed);
   }
