@@ -5,6 +5,8 @@
  * Keep in sync with the manifold package's manifest.ts.
  */
 
+import type { SDKRouteConfig, SDKModuleConfig } from './sdk-module.js';
+
 // ── JSON Schema subset ───────────────────────────────────────────────────────
 
 export type JsonSchema =
@@ -69,23 +71,8 @@ export interface ManifestRouteSchema {
 
 // ── SDK Route Config ─────────────────────────────────────────────────────────
 
-export interface ManifestSDKRouteConfig {
-  methodName?: string;
-  transport?: 'json' | 'multipart' | 'binary' | 'stream';
-  exclude?: boolean;
-  deprecated?: boolean | string;
-  description?: string;
-  operationId?: string;
-  group?: string;
-  internal?: boolean;
-  timeout?: number;
-  prefix?: string;
-  requiredHeaders?: Array<{
-    name: string;
-    paramName: string;
-    description?: string;
-  }>;
-}
+/** Alias of {@link SDKRouteConfig} — the canonical definition lives in sdk-module.ts. */
+export type ManifestSDKRouteConfig = SDKRouteConfig;
 
 // ── Route ────────────────────────────────────────────────────────────────────
 
@@ -99,12 +86,8 @@ export interface ManifestRoute {
 
 // ── Domain ───────────────────────────────────────────────────────────────────
 
-export interface ManifestDomain {
-  prefix: string;
-  domain?: string;
-  fileName?: string;
-  description?: string;
-  stability?: 'stable' | 'experimental' | 'internal';
+/** Extends {@link SDKModuleConfig} with manifest-only `routes`. */
+export interface ManifestDomain extends SDKModuleConfig {
   routes: ManifestRoute[];
 }
 

@@ -30,18 +30,21 @@ import { validateManifest } from '../types/manifest.js';
 
 export function intake(config: ResolvedConfig): SDKIR {
   let manifest: BackendManifest;
-  try {
-    const raw = readFileSync(config.input, 'utf-8');
-    manifest = JSON.parse(raw) as BackendManifest;
-  } catch (err) {
-    throw new Error(
-      `Failed to read manifest at "${config.input}": ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-
-  const validation = validateManifest(manifest);
-  if (!validation.valid) {
-    throw new Error(`Invalid manifest:\n  ${validation.errors.join('\n  ')}`);
+  if (config.manifest) {
+    manifest = config.manifest;
+  } else {
+    try {
+      const raw = readFileSync(config.input!, 'utf-8');
+      manifest = JSON.parse(raw) as BackendManifest;
+    } catch (err) {
+      throw new Error(
+        `Failed to read manifest at "${config.input}": ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    const validation = validateManifest(manifest);
+    if (!validation.valid) {
+      throw new Error(`Invalid manifest:\n  ${validation.errors.join('\n  ')}`);
+    }
   }
 
   const schemaPackage = manifest.schemaPackage;
@@ -79,7 +82,7 @@ export function intake(config: ResolvedConfig): SDKIR {
   const groups: OperationGroup[] = [];
   const allInlineSchemas: SchemaDefinition[] = [];
 
-  for (const domain of manifest.domains.filter((d) => d.stability !== 'internal')) {
+  for (const domain of manifest.domains) {
     const { group, inlineSchemas } = buildOperationGroup(domain, schemas);
     groups.push(group);
     allInlineSchemas.push(...inlineSchemas);
@@ -121,6 +124,10 @@ function collectExternalRefNames(manifest: BackendManifest): Set<string> {
         for (const resp of Object.values(s.response)) {
           scanSchemaForExternalRefs(resp, names);
         }
+      }
+      // Register sseReturnType as an external ref so it gets an import stub
+      if (route.sdk?.sseReturnType) {
+        names.add(pascalCase(route.sdk.sseReturnType));
       }
     }
   }
@@ -223,7 +230,7 @@ function jsonSchemaToDefinition(name: string, schema: JsonSchema): SchemaDefinit
   }
 
   if (s.type === 'object') {
-    const required = new Set((s.required as string[] | undefined) ?? []);
+    const required = new Set(Array.isArray(s.required) ? (s.required as string[]) : []);
     const rawProps = (s.properties as Record<string, JsonSchema> | undefined) ?? {};
     const properties: SchemaProperty[] = Object.entries(rawProps).map(([propName, propSchema]) => {
       const ps = propSchema as Record<string, unknown>;
@@ -281,7 +288,7 @@ export function jsonSchemaToType(schema: JsonSchema): string {
   const type = s.type as string | undefined;
 
   if (type === 'object') {
-    const required = new Set((s.required as string[] | undefined) ?? []);
+    const required = new Set(Array.isArray(s.required) ? (s.required as string[]) : []);
     const rawProps = s.properties as Record<string, JsonSchema> | undefined;
     if (rawProps) {
       const entries = Object.entries(rawProps)
@@ -355,15 +362,15 @@ function buildOperationGroup(
 ): { group: OperationGroup; inlineSchemas: SchemaDefinition[] } {
   const domainName = domain.domain ?? domain.prefix;
   const name = camelCase(domainName);
-  const fileName = kebabCase(domainName);
+  const fileName = domain.fileName ?? kebabCase(domainName);
 
   const allInlineSchemas: SchemaDefinition[] = [];
   const operations: Operation[] = [];
 
   for (const route of domain.routes) {
-    if (route.sdk?.exclude || route.sdk?.internal) continue;
-    const { operation, inlineSchemas } = buildOperation(route, name);
-    operations.push(operation);
+    if (route.sdk?.exclude) continue;
+    const { operation, inlineSchemas } = buildOperation(route, name, domain.prefix);
+    operations.push({ ...operation, visibility: route.sdk?.internal ? 'internal' : 'public' });
     for (const s of inlineSchemas) {
       allInlineSchemas.push({
         ...s,
@@ -379,6 +386,7 @@ function buildOperationGroup(
       interfaceName: pascalCase(domainName) + 'API',
       factoryName: 'create' + pascalCase(domainName) + 'API',
       description: domain.description,
+      visibility: domain.stability === 'internal' ? 'internal' : 'public',
       operations,
     },
     inlineSchemas: allInlineSchemas,
@@ -388,9 +396,12 @@ function buildOperationGroup(
 function buildOperation(
   route: ManifestRoute,
   groupName: string,
+  domainPrefix: string,
 ): { operation: Operation; inlineSchemas: SchemaDefinition[] } {
+  const prefix = (route.sdk?.prefix ?? domainPrefix).replace(/\/$/, '');
+  const fullUrl = prefix + (route.url.startsWith('/') ? route.url : '/' + route.url);
   const httpMethod = (Array.isArray(route.method) ? route.method[0] : route.method).toUpperCase();
-  const pathParams = extractPathParams(route.url, route.schema?.params);
+  const pathParams = extractPathParams(fullUrl, route.schema?.params);
   const querySchema = route.schema?.querystring ?? route.schema?.query;
   const queryParams = extractQueryParams(querySchema);
   const headerParams = extractHeaderParams(route.schema?.headers);
@@ -400,7 +411,7 @@ function buildOperation(
   const name =
     route.sdk?.methodName ??
     deriveCleanMethodName({
-      operationId: route.schema?.operationId,
+      operationId: route.schema?.operationId ?? route.sdk?.operationId,
       summary: route.schema?.summary,
       path: route.url.replace(/:([a-zA-Z_][a-zA-Z0-9_]*)/g, '{$1}'),
       httpMethod: httpMethod.toLowerCase(),
@@ -443,7 +454,11 @@ function buildOperation(
       type: bodyType,
       required: true,
       contentType:
-        route.sdk?.transport === 'multipart' ? 'multipart/form-data' : 'application/json',
+        route.sdk?.transport === 'multipart'
+          ? 'multipart/form-data'
+          : route.sdk?.transport === 'binary'
+            ? 'application/octet-stream'
+            : 'application/json',
     };
   }
 
@@ -488,17 +503,23 @@ function buildOperation(
       summary: route.schema?.summary,
       description: route.schema?.description ?? route.sdk?.description,
       httpMethod,
-      path: fastifyPathToIR(route.url, pathParams),
+      path: fastifyPathToIR(fullUrl, pathParams),
       pathParams,
       queryParams,
       queryType,
       headerParams,
       headerType,
+      cookieParams: [],
       requestBody,
+      requestBodyContentTypes: requestBody ? [requestBody.contentType] : [],
       responseType,
       statusCode,
-      deprecated: route.sdk?.deprecated ? true : undefined,
+      deprecated: route.sdk?.deprecated ? true : false,
+      deprecationMessage: typeof route.sdk?.deprecated === 'string' ? route.sdk.deprecated : undefined,
+      timeoutMs: route.sdk?.timeout,
+      visibility: 'public',
       isEventStream: route.sse ?? route.sdk?.transport === 'stream',
+      sseReturnType: route.sdk?.sseReturnType,
     },
     inlineSchemas,
   };
@@ -530,8 +551,11 @@ function extractPathParams(url: string, paramsSchema?: JsonSchema): Parameter[] 
   if (urlParams.length === 0) return [];
 
   const s = paramsSchema as Record<string, unknown> | undefined;
-  const props = s?.properties as Record<string, JsonSchema> | undefined;
-  const required = new Set((s?.required as string[] | undefined) ?? []);
+  const props =
+    typeof s?.properties === 'object' && !Array.isArray(s?.properties)
+      ? (s.properties as Record<string, JsonSchema>)
+      : undefined;
+  const required = new Set(Array.isArray(s?.required) ? (s.required as string[]) : []);
 
   return urlParams.map((paramName) => {
     const propSchema = props?.[paramName];
@@ -552,7 +576,7 @@ function extractQueryParams(querySchema?: JsonSchema): Parameter[] {
   const s = querySchema as Record<string, unknown>;
   if (s.type !== 'object' || !s.properties) return [];
 
-  const required = new Set((s.required as string[] | undefined) ?? []);
+  const required = new Set(Array.isArray(s.required) ? (s.required as string[]) : []);
   const props = s.properties as Record<string, JsonSchema>;
 
   return Object.entries(props).map(([name, schema]) => ({
@@ -579,7 +603,7 @@ function extractHeaderParams(headersSchema?: JsonSchema): Parameter[] {
   const s = headersSchema as Record<string, unknown>;
   if (s.type !== 'object' || !s.properties) return [];
 
-  const required = new Set((s.required as string[] | undefined) ?? []);
+  const required = new Set(Array.isArray(s.required) ? (s.required as string[]) : []);
   const props = s.properties as Record<string, JsonSchema>;
 
   return Object.entries(props)

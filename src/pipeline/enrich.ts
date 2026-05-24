@@ -1,9 +1,16 @@
 /**
- * Enrichment — adds symbol table, import graph, topological order,
- * doc blocks, signatures, and domain allocation to a raw SDKIR.
+ * Enrichment — transforms raw SDKIR into an enriched, compiler-ready IR.
+ * Responsibilities:
+ *  - Symbol resolution
+ *  - Import graph construction
+ *  - Topological schema ordering
+ *  - Domain allocation
+ *  - Render + serialization decisions
+ *  - Method normalization (dedupe)
+ *  - Operation signatures
+ *  - Documentation blocks
  */
 
-import { camelCase, pascalCase } from 'change-case';
 import type {
   SDKIR,
   EnrichedSDKIR,
@@ -17,29 +24,33 @@ import type {
   DocBlock,
   SchemaRenderDecision,
   SerializationHint,
-} from '../types/ir.js';
-import { deduplicateMethodNames } from '../utils/naming.js';
+} from "../types/ir.js";
 
-// ── Entry point ──────────────────────────────────────────────────────────────
+import { deduplicateMethodNames } from "../utils/naming.js";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Entry Point
+// ─────────────────────────────────────────────────────────────────────────────
 
 export function enrich(ir: SDKIR): EnrichedSDKIR {
-  const symbolTable = buildSymbolTable(ir.schemas);
-  const importGraph = buildImportGraph(ir.schemas, symbolTable);
-  const schemaOrder = topoSort(ir.schemas, importGraph);
-  const domainAllocations = buildDomainAllocations(ir.groups, ir.schemas, symbolTable);
-  const renderDecisions = buildRenderDecisions(ir.schemas);
-  const serialization = buildSerializationHints(ir.schemas);
-  const operations = deduplicateAllMethods(ir.groups);
-  const signatures = buildSignatures(operations);
-  const docBlocks = buildDocBlocks(operations);
+  const symbolTable = createSymbolTable(ir.schemas);
+  const importGraph = createImportGraph(ir.schemas, symbolTable);
+
+  const schemaOrder = topoSortSchemas(ir.schemas, importGraph);
+  const renderDecisions = createRenderDecisions(ir.schemas);
+  const serialization = createSerializationHints(ir.schemas);
+
+  const groups = normalizeOperations(ir.groups);
+  const signatures = createSignatures(groups);
+  const docBlocks = createDocBlocks(groups);
 
   return {
     ...ir,
-    groups: operations,
+    groups,
     symbolTable,
     importGraph,
     schemaOrder,
-    domainAllocations,
+    domainAllocations: createDomainAllocations(groups, ir.schemas),
     signatures,
     docBlocks,
     renderDecisions,
@@ -47,88 +58,131 @@ export function enrich(ir: SDKIR): EnrichedSDKIR {
   };
 }
 
-// ── Symbol table ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Symbol Table
+// ─────────────────────────────────────────────────────────────────────────────
 
-function buildSymbolTable(schemas: SchemaDefinition[]): SymbolTable {
+function createSymbolTable(schemas: SchemaDefinition[]): SymbolTable {
   const table: SymbolTable = {};
-  for (const s of schemas) {
-    table[s.name] = {
-      definedIn: s.ownership?.kind === 'generated' ? 'types' : s.ownership?.kind ?? 'types',
-      kind: s.isEnum ? 'enum' : s.isTypeAlias ? 'alias' : 'interface',
-      isExternal: s.ownership?.kind === 'external',
-      importPath: s.ownership?.kind === 'external' ? s.ownership.externalImport?.importPath : undefined,
+
+  for (const schema of schemas) {
+    const ownershipKind = schema.ownership?.kind ?? "types";
+
+    table[schema.name] = {
+      definedIn: ownershipKind === "generated" ? "types" : ownershipKind,
+      kind: schema.isEnum ? "enum" : schema.isTypeAlias ? "alias" : "interface",
+      isExternal: schema.ownership?.kind === "external",
+      importPath: schema.ownership?.externalImport?.importPath,
     };
   }
+
   return table;
 }
 
-// ── Import graph ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Import Graph
+// ─────────────────────────────────────────────────────────────────────────────
 
-function buildImportGraph(schemas: SchemaDefinition[], symbolTable: SymbolTable): ImportGraph {
+function createImportGraph(
+  schemas: SchemaDefinition[],
+  symbolTable: SymbolTable,
+): ImportGraph {
   const graph: ImportGraph = {};
+  const schemaNames = new Set(schemas.map((s) => s.name));
 
   for (const schema of schemas) {
     const deps = new Set<string>();
-    collectSchemaDeps(schema, symbolTable, deps);
-    graph[schema.name] = [...deps];
+    collectSchemaDependencies(schema, symbolTable, deps, schema.name);
+    graph[schema.name] = [...deps].filter((d) => schemaNames.has(d));
   }
 
   return graph;
 }
 
-function collectSchemaDeps(schema: SchemaDefinition, symbolTable: SymbolTable, out: Set<string>): void {
+function collectSchemaDependencies(
+  schema: SchemaDefinition,
+  symbolTable: SymbolTable,
+  out: Set<string>,
+  self: string,
+): void {
   if (schema.extends) {
-    const ref = extractRefName(schema.extends);
-    if (ref && ref !== schema.name && ref in symbolTable) out.add(ref);
+    const ref = extractSimpleRef(schema.extends);
+    if (ref && ref !== self && symbolTable[ref]) {
+      out.add(ref);
+    }
   }
 
   for (const prop of schema.properties) {
-    collectTypeDeps(prop.type, symbolTable, out, schema.name);
+    collectTypeDependencies(prop.type, symbolTable, out, self);
   }
 
   if (schema.unionMembers) {
-    for (const m of schema.unionMembers) collectTypeDeps(m, symbolTable, out, schema.name);
+    for (const t of schema.unionMembers) {
+      collectTypeDependencies(t, symbolTable, out, self);
+    }
   }
+
   if (schema.intersectionMembers) {
-    for (const m of schema.intersectionMembers) collectTypeDeps(m, symbolTable, out, schema.name);
+    for (const t of schema.intersectionMembers) {
+      collectTypeDependencies(t, symbolTable, out, self);
+    }
   }
+
   if (schema.additionalPropertiesType) {
-    collectTypeDeps(schema.additionalPropertiesType, symbolTable, out, schema.name);
+    collectTypeDependencies(
+      schema.additionalPropertiesType,
+      symbolTable,
+      out,
+      self,
+    );
   }
 }
 
-function collectTypeDeps(typeStr: string, symbolTable: SymbolTable, out: Set<string>, self: string): void {
-  // Extract PascalCase words that could be symbol references
-  const references = typeStr.match(/\b[A-Z][a-zA-Z0-9]+\b/g) ?? [];
-  for (const ref of references) {
-    if (ref !== self && ref in symbolTable && ref !== 'Array' && ref !== 'Record') {
+function collectTypeDependencies(
+  typeStr: string,
+  symbolTable: SymbolTable,
+  out: Set<string>,
+  self: string,
+): void {
+  const matches = typeStr.match(/\b[A-Z][a-zA-Z0-9]+\b/g) ?? [];
+
+  for (const ref of matches) {
+    if (
+      ref !== self &&
+      ref !== "Array" &&
+      ref !== "Record" &&
+      symbolTable[ref]
+    ) {
       out.add(ref);
     }
   }
 }
 
-function extractRefName(typeStr: string): string | undefined {
-  const match = typeStr.match(/^([A-Z][a-zA-Z0-9]+)$/);
+function extractSimpleRef(typeStr: string): string | undefined {
+  const match = /^([A-Z][a-zA-Z0-9]+)$/.exec(typeStr);
   return match?.[1];
 }
 
-// ── Topological sort ─────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Topological Sort
+// ─────────────────────────────────────────────────────────────────────────────
 
-function topoSort(schemas: SchemaDefinition[], importGraph: ImportGraph): string[] {
+function topoSortSchemas(
+  schemas: SchemaDefinition[],
+  graph: ImportGraph,
+): string[] {
   const visited = new Set<string>();
+  const visiting = new Set<string>();
   const order: string[] = [];
-  const visiting = new Set<string>(); // cycle detection
 
-  const nameSet = new Set(schemas.map((s) => s.name));
-
-  function visit(name: string): void {
+  function visit(name: string) {
     if (visited.has(name)) return;
-    if (visiting.has(name)) return; // break cycle
+    if (visiting.has(name)) return;
+
     visiting.add(name);
 
-    const deps = importGraph[name] ?? [];
-    for (const dep of deps) {
-      if (nameSet.has(dep)) visit(dep);
+    for (const dep of graph[name] ?? []) {
+      visit(dep);
     }
 
     visiting.delete(name);
@@ -136,96 +190,103 @@ function topoSort(schemas: SchemaDefinition[], importGraph: ImportGraph): string
     order.push(name);
   }
 
-  for (const schema of schemas) {
-    visit(schema.name);
+  for (const s of schemas) {
+    visit(s.name);
   }
 
   return order;
 }
 
-// ── Domain allocations ───────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Domain Allocation
+// ─────────────────────────────────────────────────────────────────────────────
 
-function buildDomainAllocations(
+function createDomainAllocations(
   groups: OperationGroup[],
   schemas: SchemaDefinition[],
-  _symbolTable: SymbolTable,
 ): DomainAllocation[] {
-  const domainMap = new Map<string, Set<string>>();
+  const map = new Map<string, Set<string>>();
 
-  // Schemas explicitly assigned to a domain
+  // Schema ownership-based grouping
   for (const schema of schemas) {
-    if (schema.ownership?.kind === 'generated' && schema.ownership.domainFile) {
-      const domain = schema.ownership.domainFile;
-      if (!domainMap.has(domain)) domainMap.set(domain, new Set());
-      domainMap.get(domain)!.add(schema.name);
+    if (schema.ownership?.kind === "generated" && schema.ownership.domainFile) {
+      ensure(map, schema.ownership.domainFile).add(schema.name);
     }
   }
 
-  // Schemas referenced by operations in each group
+  // Operation-driven grouping
   for (const group of groups) {
-    if (!domainMap.has(group.fileName)) domainMap.set(group.fileName, new Set());
-    const domainSchemas = domainMap.get(group.fileName)!;
+    const set = ensure(map, group.fileName);
 
     for (const op of group.operations) {
-      collectOperationSchemaRefs(op, domainSchemas);
+      collectOperationRefs(op, set);
     }
   }
 
-  return Array.from(domainMap.entries()).map(([fileName, schemaNames]) => ({
+  return [...map.entries()].map(([fileName, schemas]) => ({
     fileName,
-    schemas: [...schemaNames],
+    schemas: [...schemas],
   }));
 }
 
-function collectOperationSchemaRefs(op: Operation, out: Set<string>): void {
-  const refs = (op.responseType + ' ' + (op.requestBody?.type ?? '') + ' ' + (op.queryType ?? ''))
-    .match(/\b[A-Z][a-zA-Z0-9]+\b/g) ?? [];
-  for (const ref of refs) {
-    if (ref !== 'Array' && ref !== 'Record') out.add(ref);
-  }
+function ensure(map: Map<string, Set<string>>, key: string): Set<string> {
+  if (!map.has(key)) map.set(key, new Set());
+  return map.get(key)!;
+}
+
+function collectOperationRefs(op: Operation, out: Set<string>): void {
+  const scan = (value?: string) => {
+    if (!value) return;
+    const matches = value.match(/\b[A-Z][a-zA-Z0-9]+\b/g) ?? [];
+    for (const m of matches) {
+      if (m !== "Array" && m !== "Record") out.add(m);
+    }
+  };
+
+  scan(op.responseType);
+  scan(op.requestBody?.type);
+  scan(op.queryType);
+
   for (const p of [...op.pathParams, ...op.queryParams, ...op.headerParams]) {
-    const pRefs = p.type.match(/\b[A-Z][a-zA-Z0-9]+\b/g) ?? [];
-    for (const ref of pRefs) {
-      if (ref !== 'Array' && ref !== 'Record') out.add(ref);
-    }
+    scan(p.type);
   }
 }
 
-// ── Render decisions ─────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Render Decisions
+// ─────────────────────────────────────────────────────────────────────────────
 
-function buildRenderDecisions(schemas: SchemaDefinition[]): Record<string, SchemaRenderDecision> {
-  const decisions: Record<string, SchemaRenderDecision> = {};
+function createRenderDecisions(
+  schemas: SchemaDefinition[],
+): Record<string, SchemaRenderDecision> {
+  const out: Record<string, SchemaRenderDecision> = {};
 
-  for (const schema of schemas) {
-    if (schema.ownership?.kind === 'external') {
-      decisions[schema.name] = 'skip';
-    } else if (schema.isEnum) {
-      decisions[schema.name] = 'enum';
-    } else if (schema.isTypeAlias) {
-      decisions[schema.name] = 'type-alias';
-    } else if (schema.isUnionType) {
-      decisions[schema.name] = 'union';
-    } else {
-      decisions[schema.name] = 'interface';
-    }
+  for (const s of schemas) {
+    if (s.ownership?.kind === "external") out[s.name] = "skip";
+    else if (s.isEnum) out[s.name] = "enum";
+    else if (s.isTypeAlias) out[s.name] = "type-alias";
+    else if (s.isUnionType) out[s.name] = "union";
+    else out[s.name] = "interface";
   }
 
-  return decisions;
+  return out;
 }
 
-// ── Serialization hints ──────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Serialization Hints
+// ─────────────────────────────────────────────────────────────────────────────
 
-function buildSerializationHints(schemas: SchemaDefinition[]): Record<string, SerializationHint> {
+function createSerializationHints(
+  schemas: SchemaDefinition[],
+): Record<string, SerializationHint> {
   const hints: Record<string, SerializationHint> = {};
 
   for (const schema of schemas) {
-    const dateProps: string[] = [];
-    for (const prop of schema.properties) {
-      if (prop.format === 'date-time' || prop.format === 'date') {
-        dateProps.push(prop.name);
-      }
-    }
-    if (dateProps.length > 0) {
+    const dateProps = schema.properties
+      .filter((p) => p.format === "date" || p.format === "date-time")
+      .map((p) => p.name);
+
+    if (dateProps.length) {
       hints[schema.name] = { dateProperties: dateProps };
     }
   }
@@ -233,97 +294,110 @@ function buildSerializationHints(schemas: SchemaDefinition[]): Record<string, Se
   return hints;
 }
 
-// ── Method deduplication ─────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Operation Normalization
+// ─────────────────────────────────────────────────────────────────────────────
 
-function deduplicateAllMethods(groups: OperationGroup[]): OperationGroup[] {
+function normalizeOperations(groups: OperationGroup[]): OperationGroup[] {
   return groups.map((group) => {
-    const names = group.operations.map((op) => op.name);
-    const deduped = deduplicateMethodNames(names);
+    const deduped = deduplicateMethodNames(group.operations.map((o) => o.name));
+
     return {
       ...group,
-      operations: group.operations.map((op, i) => ({ ...op, name: deduped[i] })),
+      operations: group.operations.map((op, i) => ({
+        ...op,
+        name: deduped[i],
+      })),
     };
   });
 }
 
-// ── Operation signatures ─────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Signatures
+// ─────────────────────────────────────────────────────────────────────────────
 
-function buildSignatures(groups: OperationGroup[]): Record<string, OperationSignature> {
-  const signatures: Record<string, OperationSignature> = {};
+function createSignatures(
+  groups: OperationGroup[],
+): Record<string, OperationSignature> {
+  const out: Record<string, OperationSignature> = {};
 
   for (const group of groups) {
     for (const op of group.operations) {
-      const paramParts: string[] = [];
+      const params: string[] = [];
 
-      // Path params always first
       for (const p of op.pathParams) {
-        paramParts.push(`${p.name}: ${p.type}`);
+        params.push(`${p.name}: ${p.type}`);
       }
 
-      // Body param
       if (op.requestBody) {
-        paramParts.push(`body: ${op.requestBody.type}`);
+        params.push(`body: ${op.requestBody.type}`);
       }
 
-      // Query params (as options bag)
-      const optionalQuery = op.queryParams.filter((p) => !p.required);
-      const requiredQuery = op.queryParams.filter((p) => p.required);
-      if (requiredQuery.length > 0 || op.queryType) {
-        if (op.queryType) {
-          paramParts.push(`query: ${op.queryType}`);
-        } else {
-          const queryParts = requiredQuery.map((p) => `${p.name}: ${p.type}`);
-          paramParts.push(queryParts.join(', '));
-        }
-      }
-      if (optionalQuery.length > 0 && !op.queryType) {
-        const optParts = optionalQuery.map((p) => `${p.name}?: ${p.type}`);
-        paramParts.push(optParts.join(', '));
+      if (op.queryType) {
+        params.push(`query: ${op.queryType}`);
+      } else {
+        const req = op.queryParams
+          .filter((p) => p.required)
+          .map((p) => `${p.name}: ${p.type}`);
+
+        const opt = op.queryParams
+          .filter((p) => !p.required)
+          .map((p) => `${p.name}?: ${p.type}`);
+
+        if (req.length) params.push(req.join(", "));
+        if (opt.length) params.push(opt.join(", "));
       }
 
-      // Header params
       for (const h of op.headerParams) {
-        paramParts.push(`${h.name}${h.required ? '' : '?'}: ${h.type}`);
+        params.push(`${h.name}${h.required ? "" : "?"}: ${h.type}`);
       }
 
-      const returnType = op.isEventStream ? `AsyncIterable<${op.responseType}>` : op.responseType;
+      const returnType = op.isEventStream
+        ? `AsyncIterable<${op.responseType}>`
+        : op.responseType;
 
-      signatures[`${group.name}.${op.name}`] = {
-        params: paramParts.join(', '),
+      out[`${group.name}.${op.name}`] = {
+        params: params.join(", "),
         returnType,
         isAsync: true,
       };
     }
   }
 
-  return signatures;
+  return out;
 }
 
-// ── Doc blocks ───────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Doc Blocks
+// ─────────────────────────────────────────────────────────────────────────────
 
-function buildDocBlocks(groups: OperationGroup[]): Record<string, DocBlock> {
-  const docs: Record<string, DocBlock> = {};
+function createDocBlocks(groups: OperationGroup[]): Record<string, DocBlock> {
+  const out: Record<string, DocBlock> = {};
 
   for (const group of groups) {
     for (const op of group.operations) {
       const lines: string[] = [];
 
       if (op.summary) lines.push(op.summary);
+
       if (op.description && op.description !== op.summary) {
-        if (lines.length > 0) lines.push('');
+        if (lines.length) lines.push("");
         lines.push(op.description);
       }
 
       for (const p of op.pathParams) {
-        lines.push(`@param ${p.name} ${p.description ?? ''}`);
+        lines.push(`@param ${p.name} ${p.description ?? ""}`);
       }
+
       if (op.requestBody) {
         lines.push(`@param body ${op.requestBody.type}`);
       }
 
-      if (op.deprecated) lines.push('@deprecated');
+      if (op.deprecated) {
+        lines.push("@deprecated");
+      }
 
-      docs[`${group.name}.${op.name}`] = {
+      out[`${group.name}.${op.name}`] = {
         summary: op.summary,
         description: op.description,
         lines,
@@ -331,5 +405,5 @@ function buildDocBlocks(groups: OperationGroup[]): Record<string, DocBlock> {
     }
   }
 
-  return docs;
+  return out;
 }

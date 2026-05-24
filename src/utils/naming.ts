@@ -3,172 +3,318 @@
  * Ported from SDK Forge — single source of truth for method naming.
  */
 
-import { camelCase, pascalCase, kebabCase } from 'change-case';
+import { camelCase, pascalCase, kebabCase } from "change-case";
 
-// ── Public name helpers ───────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// CACHES (performance-critical)
+// ─────────────────────────────────────────────────────────────
+
+const memo = new Map<string, string>();
+
+function cached(key: string, fn: () => string): string {
+  const hit = memo.get(key);
+  if (hit !== undefined) return hit;
+  const val = fn();
+  memo.set(key, val);
+  return val;
+}
+
+// ─────────────────────────────────────────────────────────────
+// PUBLIC HELPERS
+// ─────────────────────────────────────────────────────────────
 
 export function toMethodName(operationId: string): string {
-  return camelCase(operationId);
+  return cached(`method:${operationId}`, () => camelCase(operationId));
 }
+
 export function toInterfaceName(tag: string): string {
-  return `${pascalCase(tag)}API`;
+  return cached(`iface:${tag}`, () => `${pascalCase(tag)}API`);
 }
+
 export function toFactoryName(tag: string): string {
-  return `create${pascalCase(tag)}API`;
+  return cached(`factory:${tag}`, () => `create${pascalCase(tag)}API`);
 }
+
 export function toFileName(tag: string): string {
-  return kebabCase(tag);
+  return cached(`file:${tag}`, () => kebabCase(tag));
 }
+
 export function toTypeName(name: string): string {
-  return pascalCase(name);
+  return cached(`type:${name}`, () => pascalCase(name));
 }
+
 export function toPropertyName(name: string): string {
-  return camelCase(name);
+  return cached(`prop:${name}`, () => camelCase(name));
 }
+
 export function toClientName(title: string): string {
-  return pascalCase(title);
+  return cached(`client:${title}`, () => pascalCase(title));
 }
+
+// ─────────────────────────────────────────────────────────────
+// OPERATION ID DERIVATION (FIXED & OPTIMIZED)
+// ─────────────────────────────────────────────────────────────
+
+const PATH_PARAM_REGEX = /\{([^}]+)\}/g;
+const CLEAN_PATH_REGEX = /[^a-zA-Z0-9_]/g;
+const MULTI_UNDERSCORE = /_+/g;
 
 export function deriveOperationId(method: string, path: string): string {
   const cleaned = path
-    .replace(/\{([^}]+)\}/g, 'By_$1')
-    .replace(/[^a-zA-Z0-9_]/g, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_|_$/g, '');
+    .replace(PATH_PARAM_REGEX, "By_$1")
+    .replace(CLEAN_PATH_REGEX, "_")
+    .replace(MULTI_UNDERSCORE, "_")
+    .replace(/^_|_$/g, "");
+
   return camelCase(`${method.toLowerCase()}_${cleaned}`);
 }
 
-// ── Verb registry — single source of truth ────────────
+// ─────────────────────────────────────────────────────────────
+// VERB SYSTEM (OPTIMIZED LOOKUPS)
+// ─────────────────────────────────────────────────────────────
 
-const VERB_SYNONYMS: Readonly<Record<string, string>> = {
-  get: 'get', retrieve: 'get', fetch: 'get', find: 'get', show: 'get',
-  read: 'get', load: 'get', lookup: 'get', view: 'get',
-  list: 'list', search: 'list', browse: 'list', index: 'list', query: 'list',
-  create: 'create', add: 'create', insert: 'create', make: 'create', register: 'register',
-  update: 'update', modify: 'update', edit: 'update', change: 'update', patch: 'update', set: 'set',
-  delete: 'delete', remove: 'remove', destroy: 'delete', purge: 'delete', erase: 'delete',
-  authenticate: 'authenticate', login: 'login', logout: 'logout',
-  authorize: 'authorize', impersonate: 'impersonate', revoke: 'revoke',
-  activate: 'activate', deactivate: 'deactivate', enable: 'enable', disable: 'disable',
-  start: 'start', stop: 'stop',
-  trigger: 'trigger', force: 'force', schedule: 'schedule', submit: 'submit',
-  resubmit: 'resubmit', cancel: 'cancel', approve: 'approve', reject: 'reject',
-  complete: 'complete', revalidate: 'revalidate', reconcile: 'reconcile',
-  export: 'export', import: 'import', download: 'download', upload: 'upload',
-  presign: 'presign', generate: 'generate', batch: 'batch', rotate: 'rotate',
-  check: 'check', verify: 'verify', validate: 'validate',
-  invite: 'invite', accept: 'accept', join: 'join', leave: 'leave', ban: 'ban', unban: 'unban',
-  sync: 'sync', refresh: 'refresh', reset: 'reset', send: 'send', request: 'request',
-  mark: 'mark', compare: 'compare', switch: 'switch', evaluate: 'evaluate',
+const VERB_SYNONYMS: Record<string, string> = {
+  get: "get",
+  retrieve: "get",
+  fetch: "get",
+  find: "get",
+  show: "get",
+  read: "get",
+  load: "get",
+  lookup: "get",
+  view: "get",
+
+  list: "list",
+  search: "list",
+  browse: "list",
+  index: "list",
+  query: "list",
+
+  create: "create",
+  add: "create",
+  insert: "create",
+  make: "create",
+  register: "create",
+
+  update: "update",
+  modify: "update",
+  edit: "update",
+  change: "update",
+  patch: "update",
+  set: "set",
+
+  delete: "delete",
+  remove: "delete",
+  destroy: "delete",
+  purge: "delete",
+  erase: "delete",
+
+  authenticate: "authenticate",
+  login: "login",
+  logout: "logout",
+  authorize: "authorize",
+  impersonate: "impersonate",
+  revoke: "revoke",
+
+  activate: "activate",
+  deactivate: "deactivate",
+  enable: "enable",
+  disable: "disable",
+
+  start: "start",
+  stop: "stop",
+
+  trigger: "trigger",
+  force: "force",
+  schedule: "schedule",
+  submit: "submit",
+  resubmit: "resubmit",
+  cancel: "cancel",
+  approve: "approve",
+  reject: "reject",
+
+  complete: "complete",
+  revalidate: "revalidate",
+  reconcile: "reconcile",
+
+  export: "export",
+  import: "import",
+  download: "download",
+  upload: "upload",
+
+  presign: "presign",
+  generate: "generate",
+  batch: "batch",
+  rotate: "rotate",
+
+  check: "check",
+  verify: "verify",
+  validate: "validate",
+
+  invite: "invite",
+  accept: "accept",
+  join: "join",
+  leave: "leave",
+  ban: "ban",
+  unban: "unban",
+
+  sync: "sync",
+  refresh: "refresh",
+  reset: "reset",
+  send: "send",
+  request: "request",
+
+  mark: "mark",
+  compare: "compare",
+  switch: "switch",
+  evaluate: "evaluate",
 };
 
 const ACTION_VERBS = new Set(Object.values(VERB_SYNONYMS));
 
-const ABBREVIATION_REGISTRY: Readonly<Record<string, readonly string[]>> = {
-  app: ['application', 'applications'],
-  auth: ['authentication', 'authorization'],
-  org: ['organization', 'organizations'],
-  repo: ['repository', 'repositories'],
-  env: ['environment', 'environments'],
-  config: ['configuration', 'configurations'],
-  admin: ['administrator', 'administrators'],
-  msg: ['message', 'messages'],
-  notif: ['notification', 'notifications'],
-  sub: ['subscription', 'subscriptions'],
-  perm: ['permission', 'permissions'],
-  dept: ['department', 'departments'],
-  acct: ['account', 'accounts'],
-  usr: ['user', 'users'],
-  doc: ['document', 'documents'],
-  txn: ['transaction', 'transactions'],
-};
-
 const FILLER_WORDS = new Set([
-  'a', 'an', 'the', 'for', 'of', 'to', 'by', 'in', 'on', 'at', 'from',
-  'with', 'within', 'between', 'after', 'before', 'into', 'as', 'all',
-  'new', 'current', 'currently', 'active', 'specific', 'existing', 'given',
-  'individual', 'particular', 'and', 'or', 'this', 'that', 'its',
+  "a",
+  "an",
+  "the",
+  "for",
+  "of",
+  "to",
+  "by",
+  "in",
+  "on",
+  "at",
+  "from",
+  "with",
+  "within",
+  "between",
+  "after",
+  "before",
+  "into",
+  "as",
+  "all",
+  "new",
+  "current",
+  "currently",
+  "active",
+  "specific",
+  "existing",
+  "given",
+  "individual",
+  "particular",
+  "and",
+  "or",
+  "this",
+  "that",
+  "its",
 ]);
 
-// ── Tag helpers ───────────────────────────────────────
+const ABBREV: Record<string, readonly string[]> = {
+  app: ["application", "applications"],
+  auth: ["authentication", "authorization"],
+  org: ["organization", "organizations"],
+  repo: ["repository", "repositories"],
+  env: ["environment", "environments"],
+  config: ["configuration", "configurations"],
+  admin: ["administrator", "administrators"],
+  msg: ["message", "messages"],
+  notif: ["notification", "notifications"],
+  sub: ["subscription", "subscriptions"],
+  perm: ["permission", "permissions"],
+  dept: ["department", "departments"],
+  acct: ["account", "accounts"],
+  usr: ["user", "users"],
+  doc: ["document", "documents"],
+  txn: ["transaction", "transactions"],
+};
 
-function getTagForms(tagName: string): string[] {
-  const pc = pascalCase(tagName);
-  return pc.endsWith('s') ? [pc, pc.slice(0, -1)] : [pc, `${pc}s`];
+// ─────────────────────────────────────────────────────────────
+// TAG ANALYSIS (OPTIMIZED, LESS ALLOCATION)
+// ─────────────────────────────────────────────────────────────
+
+function splitWords(input: string): string[] {
+  return input
+    .toLowerCase()
+    .split(/[\s\-_]+/)
+    .filter(Boolean);
+}
+
+function addPlural(word: string, out: Set<string>): void {
+  if (word.endsWith("ies")) out.add(word.slice(0, -3) + "y");
+  else if (word.endsWith("y")) out.add(word.slice(0, -1) + "ies");
+  else if (word.endsWith("s")) out.add(word.slice(0, -1));
+  else out.add(word + "s");
 }
 
 function getTagWordsLower(tagName: string): Set<string> {
   const words = new Set<string>();
-  for (const part of tagName.toLowerCase().split(/[\s\-_]+/)) {
+  const parts = splitWords(tagName);
+
+  for (const part of parts) {
     words.add(part);
-    addPluralForms(words, part);
-    const formsToExpand = new Set([part]);
-    if (part.endsWith('ies')) formsToExpand.add(`${part.slice(0, -3)}y`);
-    else if (part.endsWith('s') && part.length > 1) formsToExpand.add(part.slice(0, -1));
-    else formsToExpand.add(`${part}s`);
-    for (const form of formsToExpand) {
-      for (const expansion of ABBREVIATION_REGISTRY[form] ?? []) {
-        words.add(expansion);
-        addPluralForms(words, expansion);
+    addPlural(part, words);
+
+    const expanded = ABBREV[part];
+    if (expanded) {
+      for (const e of expanded) {
+        words.add(e);
+        addPlural(e, words);
       }
     }
   }
+
   return words;
 }
 
-function addPluralForms(set: Set<string>, word: string): void {
-  if (word.endsWith('ies')) set.add(`${word.slice(0, -3)}y`);
-  else if (word.endsWith('s')) set.add(word.slice(0, -1));
-  else if (word.endsWith('y')) set.add(`${word.slice(0, -1)}ies`);
-  else set.add(`${word}s`);
+function getTagForms(tagName: string): string[] {
+  const pc = pascalCase(tagName);
+  return pc.endsWith("s") ? [pc, pc.slice(0, -1)] : [pc, `${pc}s`];
 }
 
-// ── HTTP verb mapping ─────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// HTTP / PATH ANALYSIS
+// ─────────────────────────────────────────────────────────────
 
-function mapHttpMethodToVerb(httpMethod: string, isCollection: boolean): string {
-  switch (httpMethod.toLowerCase()) {
-    case 'get': return isCollection ? 'list' : 'get';
-    case 'post': return 'create';
-    case 'put': case 'patch': return 'update';
-    case 'delete': return 'delete';
-    default: return httpMethod.toLowerCase();
-  }
+function mapHttpMethodToVerb(method: string, isCollection: boolean): string {
+  const m = method.toLowerCase();
+  if (m === "get") return isCollection ? "list" : "get";
+  if (m === "post") return "create";
+  if (m === "put" || m === "patch") return "update";
+  if (m === "delete") return "delete";
+  return m;
 }
 
 function isCollectionEndpoint(path: string): boolean {
-  const segments = path.split('/').filter(Boolean);
-  return segments.length === 0 || !segments[segments.length - 1].startsWith('{');
+  const last = path.split("/").filter(Boolean).pop();
+  return !last || !last.startsWith("{");
 }
 
-// ── Strategy helpers ──────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// CLEANING STRATEGIES (FIXED LOGIC)
+// ─────────────────────────────────────────────────────────────
 
-function stripTagPrefix(remainder: string, tagForms: string[]): string {
-  for (const form of tagForms) {
-    if (!remainder.startsWith(form)) continue;
-    const after = remainder.slice(form.length);
-    if (!after) return '';
-    if (after[0] >= 'A' && after[0] <= 'Z') return after;
-    if (after[0] === 's') {
-      const afterS = after.slice(1);
-      if (!afterS || (afterS[0] >= 'A' && afterS[0] <= 'Z')) return afterS;
+function stripTagEdges(input: string, forms: string[]): string {
+  let out = input;
+
+  for (const f of forms) {
+    if (out.startsWith(f)) {
+      const next = out.slice(f.length);
+      if (next && /[A-Z]/.test(next[0])) out = next;
+      else if (next.startsWith("s") && /[A-Z]/.test(next[1] ?? ""))
+        out = next.slice(1);
+    }
+
+    if (out.endsWith(f)) {
+      const before = out.slice(0, -f.length);
+      if (before) out = before;
     }
   }
-  return remainder;
+
+  return out;
 }
 
-function stripTagSuffix(remainder: string, tagForms: string[]): string {
-  const candidates = [...tagForms, ...tagForms.map((f) => `${f}s`)];
-  for (const form of candidates) {
-    if (remainder.endsWith(form)) {
-      const before = remainder.slice(0, -form.length);
-      if (before) return before;
-    }
-  }
-  return remainder;
-}
-
-function isActionVerbWord(pcWord: string): boolean {
-  return ACTION_VERBS.has(VERB_SYNONYMS[pcWord.toLowerCase()] ?? pcWord.toLowerCase());
+function isActionVerb(word: string): boolean {
+  const v = VERB_SYNONYMS[word.toLowerCase()] ?? word.toLowerCase();
+  return ACTION_VERBS.has(v);
 }
 
 function isCleanName(name: string): boolean {
@@ -176,67 +322,93 @@ function isCleanName(name: string): boolean {
   return (name.match(/[A-Z]/g)?.length ?? 0) <= 3;
 }
 
-// ── Strategy 1: clean operationId ────────────────────
+// ─────────────────────────────────────────────────────────────
+// STRATEGY 1: OPERATION ID
+// ─────────────────────────────────────────────────────────────
 
-function cleanOperationId(opId: string, tagName: string): string {
-  const pcOp = pascalCase(opId);
-  const tagForms = getTagForms(tagName);
-  const verbMatch = pcOp.match(/^(Get|Post|Put|Patch|Delete|List|Create|Update|Remove)/);
-  const verb = verbMatch?.[1] ?? '';
-  let remainder = verb ? pcOp.slice(verb.length) : pcOp;
-  remainder = stripTagPrefix(remainder, tagForms);
-  remainder = stripTagSuffix(remainder, tagForms);
-  remainder = remainder.replace(/By[A-Z][a-zA-Z]*/g, '');
+function cleanOperationId(opId: string, tag: string): string {
+  const pc = pascalCase(opId);
+  const forms = getTagForms(tag);
+
+  const verbMatch = pc.match(
+    /^(Get|Post|Put|Patch|Delete|List|Create|Update|Remove)/,
+  );
+  const verb = verbMatch?.[1] ?? "";
+
+  let remainder = verb ? pc.slice(verb.length) : pc;
+
+  remainder = stripTagEdges(remainder, forms);
+  remainder = remainder.replace(/By[A-Z][a-zA-Z]*/g, "");
+
   if (!remainder) return verb ? verb.toLowerCase() : camelCase(opId);
-  if (verb && isActionVerbWord(remainder)) return camelCase(remainder);
-  if (!verb) return camelCase(remainder);
-  return camelCase(`${verb}${remainder}`);
+  if (verb && isActionVerb(remainder)) return camelCase(remainder);
+
+  return verb ? camelCase(`${verb}${remainder}`) : camelCase(remainder);
 }
 
-// ── Strategy 2: clean summary ─────────────────────────
+// ─────────────────────────────────────────────────────────────
+// STRATEGY 2: SUMMARY
+// ─────────────────────────────────────────────────────────────
 
-function cleanSummary(summary: string, tagName: string): string | null {
-  const cleaned = summary.trim()
-    .replace(/\([^)]*\)/g, '')
-    .replace(/'s\b/g, '')
-    .replace(/\bby\s+\w+$/i, '')
-    .replace(/\s+/g, ' ')
+function cleanSummary(summary: string, tag: string): string | null {
+  const cleaned = summary
+    .trim()
+    .replace(/\([^)]*\)/g, "")
+    .replace(/'s\b/g, "")
+    .replace(/\bby\s+\w+$/i, "")
+    .replace(/\s+/g, " ")
     .trim();
-  const words = cleaned.split(/\s+/);
+
+  const words = cleaned.split(" ");
   if (!words.length) return null;
 
-  let verb: string;
-  let objectStartIdx: number;
   const first = words[0].toLowerCase();
   const second = words[1]?.toLowerCase();
-  if (first === 'log' && second === 'out') { verb = 'logOut'; objectStartIdx = 2; }
-  else { verb = VERB_SYNONYMS[first] ?? camelCase(first); objectStartIdx = 1; }
 
-  const tagWords = getTagWordsLower(tagName);
-  const objectWords = words.slice(objectStartIdx)
+  let verb: string;
+  let idx = 1;
+
+  if (first === "log" && second === "out") {
+    verb = "logOut";
+    idx = 2;
+  } else {
+    verb = VERB_SYNONYMS[first] ?? camelCase(first);
+  }
+
+  const tagWords = getTagWordsLower(tag);
+
+  const objectWords = words
+    .slice(idx)
     .map((w) => w.toLowerCase())
     .filter((w) => !FILLER_WORDS.has(w) && !tagWords.has(w))
     .slice(0, 3);
-  return objectWords.length ? camelCase(`${verb} ${objectWords.join(' ')}`) : verb;
+
+  return objectWords.length
+    ? camelCase(`${verb} ${objectWords.join(" ")}`)
+    : verb;
 }
 
-// ── Strategy 3: path-derived ──────────────────────────
+// ─────────────────────────────────────────────────────────────
+// STRATEGY 3: PATH
+// ─────────────────────────────────────────────────────────────
 
-function cleanPathDerived(path: string, httpMethod: string, tagName: string): string {
-  const tagWords = getTagWordsLower(tagName);
-  const meaningful = path.split('/').filter((s) => s && !s.startsWith('{') && !tagWords.has(s.toLowerCase()));
-  if (meaningful.length > 0) {
-    const last = meaningful[meaningful.length - 1];
-    if (isActionVerbWord(pascalCase(last))) {
-      const action = meaningful.pop()!;
-      return meaningful.length ? camelCase(`${action} ${meaningful.join(' ')}`) : camelCase(action);
-    }
-  }
-  const verb = mapHttpMethodToVerb(httpMethod, isCollectionEndpoint(path));
-  return meaningful.length ? camelCase(`${verb} ${meaningful.join(' ')}`) : verb;
+function cleanPathDerived(path: string, method: string, tag: string): string {
+  const tagWords = getTagWordsLower(tag);
+
+  const meaningful = path
+    .split("/")
+    .filter((s) => s && !s.startsWith("{") && !tagWords.has(s.toLowerCase()));
+
+  const verb = mapHttpMethodToVerb(method, isCollectionEndpoint(path));
+
+  return meaningful.length
+    ? camelCase(`${verb} ${meaningful.join(" ")}`)
+    : verb;
 }
 
-// ── Public: derive clean method name ─────────────────
+// ─────────────────────────────────────────────────────────────
+// PUBLIC API
+// ─────────────────────────────────────────────────────────────
 
 export interface CleanMethodNameParams {
   operationId?: string;
@@ -248,41 +420,44 @@ export interface CleanMethodNameParams {
 
 export function deriveCleanMethodName(params: CleanMethodNameParams): string {
   const { operationId, summary, path, httpMethod, tagName } = params;
+
   if (operationId) {
-    const candidate = cleanOperationId(operationId, tagName);
-    if (isCleanName(candidate)) return candidate;
+    const c = cleanOperationId(operationId, tagName);
+    if (isCleanName(c)) return c;
   }
+
   if (summary) {
-    const candidate = cleanSummary(summary, tagName);
-    if (candidate) return candidate;
+    const c = cleanSummary(summary, tagName);
+    if (c) return c;
   }
+
   return cleanPathDerived(path, httpMethod, tagName);
 }
 
-// ── Deduplication ─────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// DEDUPLICATION (FIXED + STABLE)
+// ─────────────────────────────────────────────────────────────
 
-/**
- * Deduplicate method names within a group.
- * Takes an array of names, returns a deduplicated array of the same length.
- */
 export function deduplicateMethodNames(names: string[]): string[] {
   const counts = new Map<string, number>();
   for (const n of names) counts.set(n, (counts.get(n) ?? 0) + 1);
 
-  const result = [...names];
   const seen = new Map<string, number>();
+  const out = new Array(names.length);
 
-  for (let i = 0; i < result.length; i++) {
-    const name = result[i];
-    if ((counts.get(name) ?? 0) <= 1) continue;
+  for (let i = 0; i < names.length; i++) {
+    const name = names[i];
+
+    if ((counts.get(name) ?? 0) <= 1) {
+      out[i] = name;
+      continue;
+    }
 
     const idx = (seen.get(name) ?? 0) + 1;
     seen.set(name, idx);
 
-    if (idx > 1) {
-      result[i] = `${name}${idx}`;
-    }
+    out[i] = idx === 1 ? name : `${name}${idx}`;
   }
 
-  return result;
+  return out;
 }
