@@ -71,6 +71,20 @@ export class TypeScriptAdapter implements LanguageAdapter {
       (n) => !externalTypeNames.has(n),
     );
 
+    // ── Schema package version resolution ────────────────────────────
+    // When no version is specified, fetch the latest from the npm registry.
+    // Supports private packages via the resolved npm auth token.
+    if (enriched.meta.schemaPackage && !enriched.meta.schemaPackage.version) {
+      const resolved = await fetchLatestPackageVersion(
+        enriched.meta.schemaPackage.name,
+        warnings,
+        config?.npmToken,
+      );
+      if (resolved) {
+        enriched.meta.schemaPackage.version = resolved;
+      }
+    }
+
     const externalPackages = collectExternalPackages(
       schemas,
       enriched.meta.schemaPackage,
@@ -276,12 +290,18 @@ export class TypeScriptAdapter implements LanguageAdapter {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-function resolveNpmPackageVersion(
+
+/**
+ * Fetches the latest version of a package from the npm registry.
+ *
+ * Uses the optional auth token to support private/internal packages.
+ * Returns `undefined` when the lookup fails (caller decides fallback).
+ */
+async function fetchLatestPackageVersion(
   packageName: string,
-  fallback: string,
   warnings: string[],
   npmToken?: string,
-): Promise<string> {
+): Promise<string | undefined> {
   const headers: Record<string, string> = {
     Accept: "application/json",
   };
@@ -289,33 +309,53 @@ function resolveNpmPackageVersion(
     headers["Authorization"] = `Bearer ${npmToken}`;
   }
 
-  return fetch(
-    `https://registry.npmjs.org/${encodeURIComponent(packageName)}/latest`,
-    {
-      signal: AbortSignal.timeout(8000),
-      headers,
-    },
-  )
-    .then(async (res) => {
-      if (res.status === 404) return fallback;
-      if (!res.ok) {
-        warnings.push(
-          `npm registry error ${res.status} for ${packageName}, using fallback`,
-        );
-        return fallback;
-      }
-      const data = (await res.json()) as { version?: string };
-      if (!data.version) return fallback;
-      return bumpPatch(data.version);
-    })
-    .catch((err) => {
+  try {
+    const res = await fetch(
+      `https://registry.npmjs.org/${encodeURIComponent(packageName)}/latest`,
+      {
+        signal: AbortSignal.timeout(8000),
+        headers,
+      },
+    );
+
+    if (res.status === 404) {
       warnings.push(
-        `npm registry unreachable for ${packageName}: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
+        `Package "${packageName}" not found on npm registry (may be private or unpublished)`,
       );
-      return fallback;
-    });
+      return undefined;
+    }
+    if (!res.ok) {
+      warnings.push(`npm registry error ${res.status} for ${packageName}`);
+      return undefined;
+    }
+    const data = (await res.json()) as { version?: string };
+    if (!data.version) {
+      warnings.push(`No version found for "${packageName}" on npm registry`);
+      return undefined;
+    }
+    return data.version;
+  } catch (err) {
+    warnings.push(
+      `npm registry unreachable for ${packageName}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return undefined;
+  }
+}
+
+function resolveNpmPackageVersion(
+  packageName: string,
+  fallback: string,
+  warnings: string[],
+  npmToken?: string,
+): Promise<string> {
+  return fetchLatestPackageVersion(packageName, warnings, npmToken).then(
+    (version) => {
+      if (!version) return fallback;
+      return bumpPatch(version);
+    },
+  );
 }
 
 function bumpPatch(version: string): string {
