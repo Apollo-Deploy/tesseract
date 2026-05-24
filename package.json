@@ -1,6 +1,6 @@
 {
   "name": "@apollo-deploy/tesseract",
-  "version": "0.1.0",
+  "version": "0.8.1",
   "type": "module",
   "description": "Manifest-first SDK generator — turns sdk-manifold/v1 manifests into production-ready TypeScript SDKs",
   "bin": {
@@ -10,8 +10,25 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "import": "./dist/index.js"
+    },
+    "./fastify": {
+      "import": "./dist/fastify.js"
+    },
+    "./express": {
+      "import": "./dist/express.js"
+    },
+    "./hono": {
+      "import": "./dist/hono.js"
+    },
+    "./koa": {
+      "import": "./dist/koa.js"
+    },
+    "./elysia": {
+      "import": "./dist/elysia.js"
+    },
+    "./nestjs": {
+      "import": "./dist/nestjs.js"
     }
   },
   "files": [
@@ -47,12 +64,50 @@
   "dependencies": {
     "change-case": "^5.4.4",
     "commander": "^12.1.0",
+    "fastify-plugin": "^5.1.0",
     "handlebars": "^4.7.8",
     "prettier": "^3.3.0",
     "ts-morph": "^27.0.2"
   },
+  "peerDependencies": {
+    "fastify": ">=4",
+    "express": ">=4",
+    "hono": ">=4",
+    "koa": ">=2",
+    "@koa/router": ">=12",
+    "elysia": ">=1",
+    "@nestjs/common": ">=9",
+    "@nestjs/core": ">=9"
+  },
+  "peerDependenciesMeta": {
+    "fastify": {
+      "optional": true
+    },
+    "express": {
+      "optional": true
+    },
+    "hono": {
+      "optional": true
+    },
+    "koa": {
+      "optional": true
+    },
+    "@koa/router": {
+      "optional": true
+    },
+    "elysia": {
+      "optional": true
+    },
+    "@nestjs/common": {
+      "optional": true
+    },
+    "@nestjs/core": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/node": "^20.14.0",
+    "fastify": "^5.8.5",
     "typescript": "^5.5.0"
   }
 }
