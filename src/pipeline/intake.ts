@@ -4,15 +4,15 @@
  * This is the only intake path in Tesseract. No OpenAPI parsing.
  */
 
-import { readFileSync } from 'node:fs';
-import { camelCase, pascalCase, kebabCase } from 'change-case';
-import { deriveCleanMethodName } from '../utils/naming.js';
+import { readFileSync } from "node:fs";
+import { camelCase, pascalCase, kebabCase } from "change-case";
+import { deriveCleanMethodName } from "../utils/naming.js";
 import type {
   BackendManifest,
   ManifestDomain,
   ManifestRoute,
   JsonSchema,
-} from '../types/manifest.js';
+} from "../types/manifest.js";
 import type {
   SDKIR,
   SDKMeta,
@@ -22,9 +22,9 @@ import type {
   RequestBodyDef,
   SchemaDefinition,
   SchemaProperty,
-} from '../types/ir.js';
-import type { ResolvedConfig } from '../types/config.js';
-import { validateManifest } from '../types/manifest.js';
+} from "../types/ir.js";
+import type { ResolvedConfig } from "../types/config.js";
+import { validateManifest } from "../types/manifest.js";
 
 // ── Entry point ──────────────────────────────────────────────────────────────
 
@@ -34,7 +34,7 @@ export function intake(config: ResolvedConfig): SDKIR {
     manifest = config.manifest;
   } else {
     try {
-      const raw = readFileSync(config.input!, 'utf-8');
+      const raw = readFileSync(config.input!, "utf-8");
       manifest = JSON.parse(raw) as BackendManifest;
     } catch (err) {
       throw new Error(
@@ -43,7 +43,7 @@ export function intake(config: ResolvedConfig): SDKIR {
     }
     const validation = validateManifest(manifest);
     if (!validation.valid) {
-      throw new Error(`Invalid manifest:\n  ${validation.errors.join('\n  ')}`);
+      throw new Error(`Invalid manifest:\n  ${validation.errors.join("\n  ")}`);
     }
   }
 
@@ -61,7 +61,7 @@ export function intake(config: ResolvedConfig): SDKIR {
         isEnum: false,
         properties: [],
         ownership: {
-          kind: 'external' as const,
+          kind: "external" as const,
           externalImport: {
             packageName: schemaPackage.name,
             importPath: importPath!,
@@ -77,7 +77,10 @@ export function intake(config: ResolvedConfig): SDKIR {
       ([k]) => !externalRefNames.has(pascalCase(k)),
     ),
   );
-  const schemas: SchemaDefinition[] = [...externalSchemas, ...buildSchemas(localDefinitions)];
+  const schemas: SchemaDefinition[] = [
+    ...externalSchemas,
+    ...buildSchemas(localDefinitions),
+  ];
 
   const groups: OperationGroup[] = [];
   const allInlineSchemas: SchemaDefinition[] = [];
@@ -97,8 +100,9 @@ export function intake(config: ResolvedConfig): SDKIR {
     // When undefined the TypeScript adapter queries npm and bumps the patch.
     packageVersion: config.packageVersion,
     description: manifest.info.description,
-    baseUrl: config.baseUrl ?? manifest.info.baseUrl ?? 'http://localhost',
-    packageName: config.packageName ?? kebabCase(manifest.info.title).toLowerCase(),
+    baseUrl: config.baseUrl ?? manifest.info.baseUrl ?? "http://localhost",
+    packageName:
+      config.packageName ?? kebabCase(manifest.info.title).toLowerCase(),
     clientName: config.clientName ?? pascalCase(manifest.info.title),
     schemaPackage: schemaPackage
       ? { name: schemaPackage.name, version: schemaPackage.version, importPath }
@@ -117,7 +121,13 @@ function collectExternalRefNames(manifest: BackendManifest): Set<string> {
     for (const route of domain.routes) {
       const s = route.schema;
       if (!s) continue;
-      for (const field of [s.params, s.querystring, s.query, s.body, s.headers]) {
+      for (const field of [
+        s.params,
+        s.querystring,
+        s.query,
+        s.body,
+        s.headers,
+      ]) {
         if (field) scanSchemaForExternalRefs(field, names);
       }
       if (s.response) {
@@ -136,9 +146,9 @@ function collectExternalRefNames(manifest: BackendManifest): Set<string> {
 
 function scanSchemaForExternalRefs(schema: JsonSchema, out: Set<string>): void {
   const s = schema as Record<string, unknown>;
-  if (typeof s.$ref === 'string') {
-    if (!s.$ref.startsWith('#')) {
-      out.add(pascalCase(s.$ref.split('/').pop()!));
+  if (typeof s.$ref === "string") {
+    if (!s.$ref.startsWith("#")) {
+      out.add(pascalCase(s.$ref.split("/").pop()!));
     }
     return;
   }
@@ -146,11 +156,11 @@ function scanSchemaForExternalRefs(schema: JsonSchema, out: Set<string>): void {
   if (props) {
     for (const v of Object.values(props)) scanSchemaForExternalRefs(v, out);
   }
-  if (s.additionalProperties && typeof s.additionalProperties === 'object') {
+  if (s.additionalProperties && typeof s.additionalProperties === "object") {
     scanSchemaForExternalRefs(s.additionalProperties as JsonSchema, out);
   }
   if (s.items) scanSchemaForExternalRefs(s.items as JsonSchema, out);
-  for (const key of ['allOf', 'oneOf', 'anyOf'] as const) {
+  for (const key of ["allOf", "oneOf", "anyOf"] as const) {
     const arr = s[key] as JsonSchema[] | undefined;
     if (Array.isArray(arr)) {
       for (const m of arr) scanSchemaForExternalRefs(m, out);
@@ -160,16 +170,21 @@ function scanSchemaForExternalRefs(schema: JsonSchema, out: Set<string>): void {
 
 // ── Schema building ──────────────────────────────────────────────────────────
 
-function buildSchemas(definitions: Record<string, JsonSchema>): SchemaDefinition[] {
+function buildSchemas(
+  definitions: Record<string, JsonSchema>,
+): SchemaDefinition[] {
   return Object.entries(definitions).map(([name, schema]) =>
     jsonSchemaToDefinition(pascalCase(name), schema),
   );
 }
 
-function jsonSchemaToDefinition(name: string, schema: JsonSchema): SchemaDefinition {
+function jsonSchemaToDefinition(
+  name: string,
+  schema: JsonSchema,
+): SchemaDefinition {
   const s = schema as Record<string, unknown>;
 
-  if ('enum' in s && Array.isArray(s.enum)) {
+  if ("enum" in s && Array.isArray(s.enum)) {
     return {
       name,
       description: s.description as string | undefined,
@@ -182,7 +197,7 @@ function jsonSchemaToDefinition(name: string, schema: JsonSchema): SchemaDefinit
     };
   }
 
-  if ('oneOf' in s && Array.isArray(s.oneOf)) {
+  if ("oneOf" in s && Array.isArray(s.oneOf)) {
     return {
       name,
       description: s.description as string | undefined,
@@ -194,7 +209,7 @@ function jsonSchemaToDefinition(name: string, schema: JsonSchema): SchemaDefinit
     };
   }
 
-  if ('anyOf' in s && Array.isArray(s.anyOf)) {
+  if ("anyOf" in s && Array.isArray(s.anyOf)) {
     return {
       name,
       description: s.description as string | undefined,
@@ -206,12 +221,13 @@ function jsonSchemaToDefinition(name: string, schema: JsonSchema): SchemaDefinit
     };
   }
 
-  if ('allOf' in s && Array.isArray(s.allOf)) {
+  if ("allOf" in s && Array.isArray(s.allOf)) {
     const members = s.allOf as JsonSchema[];
     if (members.length === 2) {
-      const refMember = members.find((m) => '$ref' in m);
+      const refMember = members.find((m) => "$ref" in m);
       const objectMember = members.find(
-        (m) => !('$ref' in m) && (m as Record<string, unknown>).type === 'object',
+        (m) =>
+          !("$ref" in m) && (m as Record<string, unknown>).type === "object",
       );
       if (refMember && objectMember) {
         const baseDef = jsonSchemaToDefinition(name, objectMember);
@@ -229,26 +245,33 @@ function jsonSchemaToDefinition(name: string, schema: JsonSchema): SchemaDefinit
     };
   }
 
-  if (s.type === 'object') {
-    const required = new Set(Array.isArray(s.required) ? (s.required as string[]) : []);
-    const rawProps = (s.properties as Record<string, JsonSchema> | undefined) ?? {};
-    const properties: SchemaProperty[] = Object.entries(rawProps).map(([propName, propSchema]) => {
-      const ps = propSchema as Record<string, unknown>;
-      return {
-        name: propName,
-        type: jsonSchemaToType(propSchema),
-        required: required.has(propName),
-        description: ps.description as string | undefined,
-        nullable: (ps.nullable as boolean | undefined) ?? false,
-        format: ps.format as string | undefined,
-        readOnly: ps.readOnly as boolean | undefined,
-        writeOnly: ps.writeOnly as boolean | undefined,
-      };
-    });
+  if (s.type === "object") {
+    const required = new Set(
+      Array.isArray(s.required) ? (s.required as string[]) : [],
+    );
+    const rawProps =
+      (s.properties as Record<string, JsonSchema> | undefined) ?? {};
+    const properties: SchemaProperty[] = Object.entries(rawProps).map(
+      ([propName, propSchema]) => {
+        const ps = propSchema as Record<string, unknown>;
+        return {
+          name: propName,
+          type: jsonSchemaToType(propSchema),
+          required: required.has(propName),
+          description: ps.description as string | undefined,
+          nullable: (ps.nullable as boolean | undefined) ?? false,
+          format: ps.format as string | undefined,
+          readOnly: ps.readOnly as boolean | undefined,
+          writeOnly: ps.writeOnly as boolean | undefined,
+        };
+      },
+    );
 
     const ap = s.additionalProperties;
     const additionalPropertiesType =
-      ap && typeof ap === 'object' ? jsonSchemaToType(ap as JsonSchema) : undefined;
+      ap && typeof ap === "object"
+        ? jsonSchemaToType(ap as JsonSchema)
+        : undefined;
 
     return {
       name,
@@ -261,7 +284,9 @@ function jsonSchemaToDefinition(name: string, schema: JsonSchema): SchemaDefinit
 
   return {
     name,
-    description: (s as Record<string, unknown>).description as string | undefined,
+    description: (s as Record<string, unknown>).description as
+      | string
+      | undefined,
     isEnum: false,
     isTypeAlias: true,
     properties: [],
@@ -273,72 +298,81 @@ function jsonSchemaToDefinition(name: string, schema: JsonSchema): SchemaDefinit
 export function jsonSchemaToType(schema: JsonSchema): string {
   const s = schema as Record<string, unknown>;
 
-  if ('$ref' in s && typeof s.$ref === 'string') {
-    return pascalCase(s.$ref.split('/').pop()!);
+  if ("$ref" in s && typeof s.$ref === "string") {
+    return pascalCase(s.$ref.split("/").pop()!);
   }
 
-  if ('enum' in s && Array.isArray(s.enum)) {
-    return (s.enum as unknown[]).map((v) => JSON.stringify(v)).join(' | ');
+  if ("enum" in s && Array.isArray(s.enum)) {
+    return (s.enum as unknown[]).map((v) => JSON.stringify(v)).join(" | ");
   }
 
-  if (Array.isArray(s.allOf)) return (s.allOf as JsonSchema[]).map(jsonSchemaToType).join(' & ');
-  if (Array.isArray(s.oneOf)) return (s.oneOf as JsonSchema[]).map(jsonSchemaToType).join(' | ');
-  if (Array.isArray(s.anyOf)) return (s.anyOf as JsonSchema[]).map(jsonSchemaToType).join(' | ');
+  if (Array.isArray(s.allOf))
+    return (s.allOf as JsonSchema[]).map(jsonSchemaToType).join(" & ");
+  if (Array.isArray(s.oneOf))
+    return (s.oneOf as JsonSchema[]).map(jsonSchemaToType).join(" | ");
+  if (Array.isArray(s.anyOf))
+    return (s.anyOf as JsonSchema[]).map(jsonSchemaToType).join(" | ");
 
   const type = s.type as string | undefined;
 
-  if (type === 'object') {
-    const required = new Set(Array.isArray(s.required) ? (s.required as string[]) : []);
+  if (type === "object") {
+    const required = new Set(
+      Array.isArray(s.required) ? (s.required as string[]) : [],
+    );
     const rawProps = s.properties as Record<string, JsonSchema> | undefined;
     if (rawProps) {
       const entries = Object.entries(rawProps)
-        .map(([k, v]) => `${k}${required.has(k) ? '' : '?'}: ${jsonSchemaToType(v)}`)
-        .join('; ');
+        .map(
+          ([k, v]) =>
+            `${k}${required.has(k) ? "" : "?"}: ${jsonSchemaToType(v)}`,
+        )
+        .join("; ");
       const ap = s.additionalProperties;
-      if (ap && typeof ap === 'object') {
+      if (ap && typeof ap === "object") {
         return `{ ${entries}; [key: string]: ${jsonSchemaToType(ap as JsonSchema)} }`;
       }
-      return entries ? `{ ${entries} }` : 'Record<string, unknown>';
+      return entries ? `{ ${entries} }` : "Record<string, unknown>";
     }
-    if (s.additionalProperties && typeof s.additionalProperties === 'object') {
+    if (s.additionalProperties && typeof s.additionalProperties === "object") {
       return `Record<string, ${jsonSchemaToType(s.additionalProperties as JsonSchema)}>`;
     }
-    return 'Record<string, unknown>';
+    return "Record<string, unknown>";
   }
 
-  if (type === 'array') {
+  if (type === "array") {
     const items = s.items as JsonSchema | undefined;
-    return `Array<${items ? jsonSchemaToType(items) : 'unknown'}>`;
+    return `Array<${items ? jsonSchemaToType(items) : "unknown"}>`;
   }
 
-  if (type === 'string' || type === 'date') return 'string';
-  if (type === 'number' || type === 'integer') return 'number';
-  if (type === 'boolean') return 'boolean';
-  if (type === 'null') return 'null';
-  if (type === 'never') return 'never';
+  if (type === "string" || type === "date") return "string";
+  if (type === "number" || type === "integer") return "number";
+  if (type === "boolean") return "boolean";
+  if (type === "null") return "null";
+  if (type === "never") return "never";
 
-  if (type === 'nullable') {
+  if (type === "nullable") {
     const def = s.def as Record<string, unknown> | undefined;
-    if (def?.innerType) return jsonSchemaToType(def.innerType as JsonSchema) + ' | null';
-    return 'unknown | null';
+    if (def?.innerType)
+      return jsonSchemaToType(def.innerType as JsonSchema) + " | null";
+    return "unknown | null";
   }
 
-  if (type === 'union') {
+  if (type === "union") {
     const options = s.options as JsonSchema[] | undefined;
-    if (options) return options.map(jsonSchemaToType).join(' | ');
+    if (options) return options.map(jsonSchemaToType).join(" | ");
   }
 
-  return 'unknown';
+  return "unknown";
 }
 
 // ── Group / operation building ───────────────────────────────────────────────
 
 function isComplexInlineSchema(s: Record<string, unknown>): boolean {
-  if (s.type === 'object') return true;
+  if (s.type === "object") return true;
   if (Array.isArray(s.allOf)) return true;
 
   // anyOf / oneOf that is just `SomeRef | null` is not complex — emit inline
-  for (const key of ['anyOf', 'oneOf'] as const) {
+  for (const key of ["anyOf", "oneOf"] as const) {
     const arr = s[key] as JsonSchema[] | undefined;
     if (!Array.isArray(arr)) continue;
     if (isNullableRefUnion(arr)) return false;
@@ -351,8 +385,10 @@ function isComplexInlineSchema(s: Record<string, unknown>): boolean {
 /** Returns true when the union is exactly `{ $ref } | { type: "null" }` */
 function isNullableRefUnion(members: JsonSchema[]): boolean {
   if (members.length !== 2) return false;
-  const refMember = members.find((m) => '$ref' in m);
-  const nullMember = members.find((m) => (m as Record<string, unknown>).type === 'null');
+  const refMember = members.find((m) => "$ref" in m);
+  const nullMember = members.find(
+    (m) => (m as Record<string, unknown>).type === "null",
+  );
   return !!refMember && !!nullMember;
 }
 
@@ -369,12 +405,19 @@ function buildOperationGroup(
 
   for (const route of domain.routes) {
     if (route.sdk?.exclude) continue;
-    const { operation, inlineSchemas } = buildOperation(route, name, domain.prefix);
-    operations.push({ ...operation, visibility: route.sdk?.internal ? 'internal' : 'public' });
+    const { operation, inlineSchemas } = buildOperation(
+      route,
+      name,
+      domain.prefix,
+    );
+    operations.push({
+      ...operation,
+      visibility: route.sdk?.internal ? "internal" : "public",
+    });
     for (const s of inlineSchemas) {
       allInlineSchemas.push({
         ...s,
-        ownership: { kind: 'generated', domainFile: fileName },
+        ownership: { kind: "generated", domainFile: fileName },
       });
     }
   }
@@ -383,10 +426,10 @@ function buildOperationGroup(
     group: {
       name,
       fileName,
-      interfaceName: pascalCase(domainName) + 'API',
-      factoryName: 'create' + pascalCase(domainName) + 'API',
+      interfaceName: pascalCase(domainName) + "API",
+      factoryName: "create" + pascalCase(domainName) + "API",
       description: domain.description,
-      visibility: domain.stability === 'internal' ? 'internal' : 'public',
+      visibility: domain.stability === "internal" ? "internal" : "public",
       operations,
     },
     inlineSchemas: allInlineSchemas,
@@ -398,9 +441,13 @@ function buildOperation(
   groupName: string,
   domainPrefix: string,
 ): { operation: Operation; inlineSchemas: SchemaDefinition[] } {
-  const prefix = (route.sdk?.prefix ?? domainPrefix).replace(/\/$/, '');
-  const fullUrl = prefix + (route.url.startsWith('/') ? route.url : '/' + route.url);
-  const httpMethod = (Array.isArray(route.method) ? route.method[0] : route.method).toUpperCase();
+  const prefix = (route.sdk?.prefix ?? domainPrefix).replace(/\/$/, "");
+  // When route.url is '/' it means the route URL exactly matched the domain
+  // prefix — avoid doubling the slash (e.g. /signal/projects + / = /signal/projects/).
+  const fullUrl = route.url === "/" ? prefix || "/" : prefix + route.url;
+  const httpMethod = (
+    Array.isArray(route.method) ? route.method[0] : route.method
+  ).toUpperCase();
   const pathParams = extractPathParams(fullUrl, route.schema?.params);
   const querySchema = route.schema?.querystring ?? route.schema?.query;
   const queryParams = extractQueryParams(querySchema);
@@ -413,23 +460,26 @@ function buildOperation(
     deriveCleanMethodName({
       operationId: route.schema?.operationId ?? route.sdk?.operationId,
       summary: route.schema?.summary,
-      path: route.url.replace(/:([a-zA-Z_][a-zA-Z0-9_]*)/g, '{$1}'),
+      path: route.url.replace(/:([a-zA-Z_][a-zA-Z0-9_]*)/g, "{$1}"),
       httpMethod: httpMethod.toLowerCase(),
       tagName: groupName,
     });
 
   // Response type
-  let responseType = 'void';
+  let responseType = "void";
   let statusCode = 200;
   const successResponse = pickSuccessResponse(route.schema?.response);
   if (successResponse) {
     const { schema: successSchema, statusCode: sc } = successResponse;
     statusCode = sc;
     const rs = successSchema as Record<string, unknown>;
-    if (rs.type === 'null' || (rs.type === 'object' && !rs.properties && !rs.$ref)) {
-      responseType = 'void';
-    } else if (typeof rs.$ref !== 'string' && isComplexInlineSchema(rs)) {
-      const typeName = pascalCase(name) + 'Response';
+    if (
+      rs.type === "null" ||
+      (rs.type === "object" && !rs.properties && !rs.$ref)
+    ) {
+      responseType = "void";
+    } else if (typeof rs.$ref !== "string" && isComplexInlineSchema(rs)) {
+      const typeName = pascalCase(name) + "Response";
       inlineSchemas.push(jsonSchemaToDefinition(typeName, successSchema));
       responseType = typeName;
     } else {
@@ -443,8 +493,8 @@ function buildOperation(
     const bodySchema = route.schema.body;
     const bs = bodySchema as Record<string, unknown>;
     let bodyType: string;
-    if (typeof bs.$ref !== 'string' && isComplexInlineSchema(bs)) {
-      const typeName = pascalCase(name) + 'Input';
+    if (typeof bs.$ref !== "string" && isComplexInlineSchema(bs)) {
+      const typeName = pascalCase(name) + "Input";
       inlineSchemas.push(jsonSchemaToDefinition(typeName, bodySchema));
       bodyType = typeName;
     } else {
@@ -454,11 +504,11 @@ function buildOperation(
       type: bodyType,
       required: true,
       contentType:
-        route.sdk?.transport === 'multipart'
-          ? 'multipart/form-data'
-          : route.sdk?.transport === 'binary'
-            ? 'application/octet-stream'
-            : 'application/json',
+        route.sdk?.transport === "multipart"
+          ? "multipart/form-data"
+          : route.sdk?.transport === "binary"
+            ? "application/octet-stream"
+            : "application/json",
     };
   }
 
@@ -466,7 +516,7 @@ function buildOperation(
   let queryType: string | undefined;
   if (querySchema) {
     const qs = querySchema as Record<string, unknown>;
-    if (typeof qs.$ref === 'string') {
+    if (typeof qs.$ref === "string") {
       queryType = jsonSchemaToType(querySchema);
     } else if (queryParams.length > 0) {
       queryType = jsonSchemaToType(querySchema);
@@ -479,7 +529,7 @@ function buildOperation(
       headerParams.push({
         name: camelCase(rh.paramName),
         originalName: rh.name,
-        type: 'string',
+        type: "string",
         required: true,
         description: rh.description,
       });
@@ -490,10 +540,10 @@ function buildOperation(
   let headerType: string | undefined;
   if (headerParams.length > 0) {
     const props = headerParams.map((p) => {
-      const opt = p.required ? '' : '?';
+      const opt = p.required ? "" : "?";
       return `${p.name}${opt}: ${p.type}`;
     });
-    headerType = `{ ${props.join('; ')} }`;
+    headerType = `{ ${props.join("; ")} }`;
   }
 
   return {
@@ -515,10 +565,13 @@ function buildOperation(
       responseType,
       statusCode,
       deprecated: route.sdk?.deprecated ? true : false,
-      deprecationMessage: typeof route.sdk?.deprecated === 'string' ? route.sdk.deprecated : undefined,
+      deprecationMessage:
+        typeof route.sdk?.deprecated === "string"
+          ? route.sdk.deprecated
+          : undefined,
       timeoutMs: route.sdk?.timeout,
-      visibility: 'public',
-      isEventStream: route.sse ?? route.sdk?.transport === 'stream',
+      visibility: "public",
+      isEventStream: route.sse ?? route.sdk?.transport === "stream",
       sseReturnType: route.sdk?.sseReturnType,
     },
     inlineSchemas,
@@ -528,16 +581,63 @@ function buildOperation(
 // ── Parameter extraction ─────────────────────────────────────────────────────
 
 const TS_RESERVED_WORDS = new Set([
-  'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default',
-  'delete', 'do', 'else', 'enum', 'export', 'extends', 'false', 'finally',
-  'for', 'function', 'if', 'import', 'in', 'instanceof', 'new', 'null',
-  'return', 'super', 'switch', 'this', 'throw', 'true', 'try', 'typeof',
-  'var', 'void', 'while', 'with', 'as', 'implements', 'interface', 'let',
-  'package', 'private', 'protected', 'public', 'static', 'yield', 'type',
+  "break",
+  "case",
+  "catch",
+  "class",
+  "const",
+  "continue",
+  "debugger",
+  "default",
+  "delete",
+  "do",
+  "else",
+  "enum",
+  "export",
+  "extends",
+  "false",
+  "finally",
+  "for",
+  "function",
+  "if",
+  "import",
+  "in",
+  "instanceof",
+  "new",
+  "null",
+  "return",
+  "super",
+  "switch",
+  "this",
+  "throw",
+  "true",
+  "try",
+  "typeof",
+  "var",
+  "void",
+  "while",
+  "with",
+  "as",
+  "implements",
+  "interface",
+  "let",
+  "package",
+  "private",
+  "protected",
+  "public",
+  "static",
+  "yield",
+  "type",
 ]);
 
 /** Parameter names reserved by the generated method signatures. */
-const FIXED_PARAM_NAMES = new Set(['input', 'query', 'headerOptions', 'cookies', 'options']);
+const FIXED_PARAM_NAMES = new Set([
+  "input",
+  "query",
+  "headerOptions",
+  "cookies",
+  "options",
+]);
 
 function safeParamName(name: string): string {
   if (TS_RESERVED_WORDS.has(name) || FIXED_PARAM_NAMES.has(name)) {
@@ -546,26 +646,35 @@ function safeParamName(name: string): string {
   return name;
 }
 
-function extractPathParams(url: string, paramsSchema?: JsonSchema): Parameter[] {
-  const urlParams = [...url.matchAll(/:([a-zA-Z_][a-zA-Z0-9_]*)/g)].map((m) => m[1]);
+function extractPathParams(
+  url: string,
+  paramsSchema?: JsonSchema,
+): Parameter[] {
+  const urlParams = [...url.matchAll(/:([a-zA-Z_][a-zA-Z0-9_]*)/g)].map(
+    (m) => m[1],
+  );
   if (urlParams.length === 0) return [];
 
   const s = paramsSchema as Record<string, unknown> | undefined;
   const props =
-    typeof s?.properties === 'object' && !Array.isArray(s?.properties)
+    typeof s?.properties === "object" && !Array.isArray(s?.properties)
       ? (s.properties as Record<string, JsonSchema>)
       : undefined;
-  const required = new Set(Array.isArray(s?.required) ? (s.required as string[]) : []);
+  const required = new Set(
+    Array.isArray(s?.required) ? (s.required as string[]) : [],
+  );
 
   return urlParams.map((paramName) => {
     const propSchema = props?.[paramName];
     return {
       name: safeParamName(camelCase(paramName)),
       originalName: paramName,
-      type: propSchema ? jsonSchemaToType(propSchema) : 'string',
+      type: propSchema ? jsonSchemaToType(propSchema) : "string",
       required: required.size === 0 || required.has(paramName),
       description: propSchema
-        ? (propSchema as Record<string, unknown>).description as string | undefined
+        ? ((propSchema as Record<string, unknown>).description as
+            | string
+            | undefined)
         : undefined,
     };
   });
@@ -574,9 +683,11 @@ function extractPathParams(url: string, paramsSchema?: JsonSchema): Parameter[] 
 function extractQueryParams(querySchema?: JsonSchema): Parameter[] {
   if (!querySchema) return [];
   const s = querySchema as Record<string, unknown>;
-  if (s.type !== 'object' || !s.properties) return [];
+  if (s.type !== "object" || !s.properties) return [];
 
-  const required = new Set(Array.isArray(s.required) ? (s.required as string[]) : []);
+  const required = new Set(
+    Array.isArray(s.required) ? (s.required as string[]) : [],
+  );
   const props = s.properties as Record<string, JsonSchema>;
 
   return Object.entries(props).map(([name, schema]) => ({
@@ -584,26 +695,32 @@ function extractQueryParams(querySchema?: JsonSchema): Parameter[] {
     originalName: name,
     type: jsonSchemaToType(schema),
     required: required.has(name),
-    description: (schema as Record<string, unknown>).description as string | undefined,
-    deprecated: (schema as Record<string, unknown>).deprecated as boolean | undefined,
+    description: (schema as Record<string, unknown>).description as
+      | string
+      | undefined,
+    deprecated: (schema as Record<string, unknown>).deprecated as
+      | boolean
+      | undefined,
   }));
 }
 
 const SYSTEM_HEADERS = new Set([
-  'content-type',
-  'content-length',
-  'transfer-encoding',
-  'host',
-  'accept',
-  'accept-encoding',
+  "content-type",
+  "content-length",
+  "transfer-encoding",
+  "host",
+  "accept",
+  "accept-encoding",
 ]);
 
 function extractHeaderParams(headersSchema?: JsonSchema): Parameter[] {
   if (!headersSchema) return [];
   const s = headersSchema as Record<string, unknown>;
-  if (s.type !== 'object' || !s.properties) return [];
+  if (s.type !== "object" || !s.properties) return [];
 
-  const required = new Set(Array.isArray(s.required) ? (s.required as string[]) : []);
+  const required = new Set(
+    Array.isArray(s.required) ? (s.required as string[]) : [],
+  );
   const props = s.properties as Record<string, JsonSchema>;
 
   return Object.entries(props)
@@ -613,7 +730,9 @@ function extractHeaderParams(headersSchema?: JsonSchema): Parameter[] {
       originalName: name,
       type: jsonSchemaToType(schema),
       required: required.has(name),
-      description: (schema as Record<string, unknown>).description as string | undefined,
+      description: (schema as Record<string, unknown>).description as
+        | string
+        | undefined,
     }));
 }
 
@@ -623,7 +742,7 @@ function fastifyPathToIR(url: string, pathParams: Parameter[]): string {
   const nameMap = new Map(pathParams.map((p) => [p.originalName, p.name]));
   return url.replace(/:([a-zA-Z_][a-zA-Z0-9_]*)/g, (_, raw) => {
     const name = nameMap.get(raw) ?? raw;
-    return '${' + name + '}';
+    return "${" + name + "}";
   });
 }
 
@@ -632,12 +751,12 @@ function pickSuccessResponse(
 ): { schema: JsonSchema; statusCode: number } | undefined {
   if (!response) return undefined;
   for (const [code, schema] of [
-    [200, response['200'] ?? response[200]],
-    [201, response['201'] ?? response[201]],
-    [202, response['202'] ?? response[202]],
-    [204, response['204'] ?? response[204]],
-    [200, response['2xx']],
-    [200, response['default']],
+    [200, response["200"] ?? response[200]],
+    [201, response["201"] ?? response[201]],
+    [202, response["202"] ?? response[202]],
+    [204, response["204"] ?? response[204]],
+    [200, response["2xx"]],
+    [200, response["default"]],
   ] as const) {
     if (schema) return { schema, statusCode: code };
   }
