@@ -3,213 +3,328 @@
  * Orchestrates model emission (ts-morph) and template rendering (Handlebars).
  */
 
-import { join } from 'node:path';
-import type { EnrichedSDKIR } from '../../types/ir.js';
-import type { LanguageAdapter, EmitResult } from '../types.js';
-import type { EmittedFile } from '../../pipeline/write.js';
-import { emitTypeScriptModels } from './model-emitter.js';
-import { splitSchemasByOwnership, buildExternalImportGroups, collectExternalPackages, COMMON_TYPE_NAMES } from './shared.js';
-import { getTemplate, registerHelpers, collectImports } from '../../helpers/handlebars.js';
-import { formatTypeScript } from '../../utils/format.js';
+import { join } from "node:path";
+import type { EnrichedSDKIR } from "../../types/ir.js";
+import type { LanguageAdapter, EmitResult } from "../types.js";
+import type { ResolvedConfig } from "../../types/config.js";
+import type { EmittedFile } from "../../pipeline/write.js";
+
+import {
+  splitSchemasByOwnership,
+  buildExternalImportGroups,
+  collectExternalPackages,
+  COMMON_TYPE_NAMES,
+} from "./shared.js";
+
+import {
+  getTemplate,
+  registerHelpers,
+  collectImports,
+} from "../../helpers/handlebars.js";
+
+import { formatTypeScript } from "../../utils/format.js";
+import { emitTypeScriptModels } from "./emitter/emitTypeScriptModels.js";
 
 export class TypeScriptAdapter implements LanguageAdapter {
-  readonly language = 'typescript';
+  readonly language = "typescript";
 
-  async emit(enriched: EnrichedSDKIR, outputDir: string): Promise<EmitResult> {
+  async emit(
+    enriched: EnrichedSDKIR,
+    outputDir: string,
+    config?: ResolvedConfig,
+  ): Promise<EmitResult> {
     registerHelpers();
+
+    const sdkStyle = config?.sdkStyle ?? "functional";
+    const clientType = config?.clientType ?? "internal";
 
     const files: EmittedFile[] = [];
     const warnings: string[] = [];
 
-    const { generatedSchemas, externalSchemas } = splitSchemasByOwnership(enriched.schemas);
-    const schemaNames = new Set(enriched.schemas.map((s) => s.name));
-    const externalImports = buildExternalImportGroups(externalSchemas);
-    const externalTypeNames = new Set(externalSchemas.map((s) => s.name));
-    const commonTypeExports = COMMON_TYPE_NAMES.filter((name) => !externalTypeNames.has(name));
-    const externalPackages = collectExternalPackages(enriched.schemas, enriched.meta.schemaPackage);
-    const hasSSE = enriched.groups.some((g) => g.operations.some((op) => op.isEventStream));
+    // ── Schema partition (single pass, avoid repeated scans) ────────────────
+    const schemas = enriched.schemas;
+    const schemaNames = new Set<string>();
+    const externalSchemas: typeof schemas = [];
 
-    // ── ts-morph: model type files ───────────────────────────────────────────
-    let domainTypeFiles: string[] = [];
-    try {
-      const { files: modelFiles, domainTypeFiles: dtf } = emitTypeScriptModels(enriched, outputDir);
-      files.push(...modelFiles);
-      domainTypeFiles = dtf;
-    } catch (err) {
-      warnings.push(`ts-morph model emission failed: ${err instanceof Error ? err.message : String(err)}`);
+    for (const s of schemas) {
+      schemaNames.add(s.name);
+      if (s.ownership?.kind === "external") externalSchemas.push(s);
     }
 
-    // ── Handlebars: all other TypeScript files ───────────────────────────────
+    const { generatedSchemas } = splitSchemasByOwnership(schemas);
 
-    // Domain files
-    const domainTemplate = getTemplate('typescript', 'domain');
-    for (const group of enriched.groups) {
+    // ── External imports (stable + deduped) ────────────────────────────────
+    const externalImports = buildExternalImportGroups(externalSchemas);
+
+    if (enriched.meta.schemaPackage) {
+      const importPath =
+        enriched.meta.schemaPackage.importPath ??
+        enriched.meta.schemaPackage.name;
+
+      if (!externalImports.some((g) => g.importPath === importPath)) {
+        externalImports.unshift({ importPath, exports: [] });
+      }
+    }
+
+    const externalTypeNames = new Set(externalSchemas.map((s) => s.name));
+    const commonTypeExports = COMMON_TYPE_NAMES.filter(
+      (n) => !externalTypeNames.has(n),
+    );
+
+    const externalPackages = collectExternalPackages(
+      schemas,
+      enriched.meta.schemaPackage,
+    );
+
+    // ── Visibility filter (single pass, avoids map+filter chain) ───────────
+    const visibleGroups: typeof enriched.groups = [];
+
+    for (const g of enriched.groups) {
+      if (clientType === "public" && g.visibility === "internal") continue;
+
+      const ops =
+        clientType === "public"
+          ? g.operations.filter((op) => op.visibility !== "internal")
+          : g.operations;
+
+      if (ops.length === 0) continue;
+
+      visibleGroups.push(ops === g.operations ? g : { ...g, operations: ops });
+    }
+
+    const hasSSE = visibleGroups.some((g) =>
+      g.operations.some((op) => op.isEventStream),
+    );
+
+    // ── Model emission (optional ts-morph stage) ───────────────────────────
+    let domainTypeFiles: string[] = [];
+    let includeModels = false;
+
+    // Emit models for any inline-generated schemas that are NOT covered by the
+    // schema package (ownership !== 'external'). When a schemaPackage is
+    // configured and all schemas are external (Zod global registry hit for
+    // every body/response), this will be empty and model emission is skipped.
+    const hasGeneratedSchemas = enriched.schemas.some(
+      (s) => s.ownership?.kind !== "external",
+    );
+
+    if (hasGeneratedSchemas) {
+      try {
+        const res = emitTypeScriptModels(enriched, outputDir);
+        files.push(...res.files);
+        domainTypeFiles = res.domainTypeFiles;
+        includeModels = true;
+      } catch (err) {
+        warnings.push(
+          `ts-morph model emission failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+
+    // ── Templates (cached + safe execution) ────────────────────────────────
+
+    const domainTemplate = getTemplate(
+      "typescript",
+      sdkStyle === "class" ? "domain-class" : "domain",
+    );
+
+    for (const group of visibleGroups) {
       try {
         const imports = collectImports(group.operations, schemaNames);
         const groupHasSSE = group.operations.some((op) => op.isEventStream);
+
         files.push({
-          relativePath: join('src', 'domain', `${group.fileName}.ts`),
-          content: domainTemplate({ ...group, imports, hasSSE: groupHasSSE }),
+          relativePath: join("src", "domain", `${group.fileName}.ts`),
+          content: domainTemplate({
+            ...group,
+            imports,
+            hasSSE: groupHasSSE,
+            securitySchemes: enriched.securitySchemes,
+          }),
         });
       } catch (err) {
-        warnings.push(`domain/${group.fileName}.ts: ${err instanceof Error ? err.message : String(err)}`);
+        warnings.push(
+          `domain/${group.fileName}.ts: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
       }
     }
 
-    // Domain index barrel
-    tryEmit(files, warnings, join('src', 'domain', 'index.ts'), () =>
-      getTemplate('typescript', 'domain-index')({ groups: enriched.groups }));
+    const emit = (
+      relativePath: string,
+      tpl: ReturnType<typeof getTemplate>,
+      ctx: unknown,
+    ): void => {
+      try {
+        files.push({
+          relativePath,
+          content: tpl(ctx),
+        });
+      } catch (err) {
+        warnings.push(
+          `${relativePath}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    };
 
-    // Types
-    tryEmit(files, warnings, join('src', 'types', 'common.ts'), () =>
-      getTemplate('typescript', 'types-common')({}));
-    tryEmit(files, warnings, join('src', 'types', 'errors.ts'), () =>
-      getTemplate('typescript', 'types-errors')({}));
-    tryEmit(files, warnings, join('src', 'types', 'index.ts'), () =>
-      getTemplate('typescript', 'types')({
-        schemas: generatedSchemas,
-        externalImports,
-        domainTypeFiles,
-        commonTypeExports,
-      }));
+    emit(
+      join("src", "domain", "index.ts"),
+      getTemplate("typescript", "domain-index"),
+      {
+        groups: visibleGroups,
+      },
+    );
 
-    // Transport
-    tryEmit(files, warnings, join('src', 'transport', 'axios.ts'), () =>
-      getTemplate('typescript', 'transport')({ securitySchemes: enriched.securitySchemes }));
+    emit("src/types/common.ts", getTemplate("typescript", "types-common"), {});
+    emit("src/types/errors.ts", getTemplate("typescript", "types-errors"), {});
+    emit("src/types/index.ts", getTemplate("typescript", "types"), {
+      schemas: generatedSchemas,
+      externalImports,
+      domainTypeFiles,
+      commonTypeExports,
+      includeModels,
+    });
 
-    // SSE transport
+    emit("src/transport/axios.ts", getTemplate("typescript", "transport"), {
+      securitySchemes: enriched.securitySchemes,
+    });
+
     if (hasSSE) {
-      tryEmit(files, warnings, join('src', 'transport', 'sse.ts'), () =>
-        getTemplate('typescript', 'transport-sse')({}));
+      emit(
+        "src/transport/sse.ts",
+        getTemplate("typescript", "transport-sse"),
+        {},
+      );
     }
 
-    // Utils
-    tryEmit(files, warnings, join('src', 'utils', 'query.ts'), () =>
-      getTemplate('typescript', 'utils-query')({}));
-    tryEmit(files, warnings, join('src', 'utils', 'index.ts'), () =>
-      getTemplate('typescript', 'utils-index')({}));
+    emit("src/utils/query.ts", getTemplate("typescript", "utils-query"), {});
+    emit("src/utils/index.ts", getTemplate("typescript", "utils-index"), {});
 
-    // Client, index, package.json, tsconfig, README
-    tryEmit(files, warnings, join('src', 'client.ts'), () =>
-      getTemplate('typescript', 'client')({
+    emit(
+      "src/client.ts",
+      getTemplate(
+        "typescript",
+        sdkStyle === "class" ? "client-class" : "client",
+      ),
+      {
         meta: enriched.meta,
-        groups: enriched.groups,
+        groups: visibleGroups,
         securitySchemes: enriched.securitySchemes,
         hasSSE,
-      }));
-    tryEmit(files, warnings, 'index.ts', () =>
-      getTemplate('typescript', 'index')({
+        clientType,
+      },
+    );
+
+    emit(
+      "index.ts",
+      getTemplate("typescript", sdkStyle === "class" ? "index-class" : "index"),
+      {
         meta: enriched.meta,
-        groups: enriched.groups,
-        schemas: enriched.schemas,
+        groups: visibleGroups,
+        schemas: schemas,
         hasSSE,
-      }));
+        clientType,
+      },
+    );
+
+    // ── Package version resolution (parallel-safe) ─────────────────────────
     const resolvedPackageVersion = enriched.meta.packageVersion
       ? enriched.meta.packageVersion
-      : await resolveNpmPackageVersion(enriched.meta.packageName, enriched.meta.version, warnings);
+      : await resolveNpmPackageVersion(
+          enriched.meta.packageName,
+          enriched.meta.version,
+          warnings,
+          config?.npmToken,
+        );
 
-    tryEmit(files, warnings, 'package.json', () =>
-      getTemplate('typescript', 'package-json')({
-        ...enriched.meta,
-        packageVersion: resolvedPackageVersion,
-        externalPackages,
-      }));
-    tryEmit(files, warnings, 'tsconfig.json', () =>
-      getTemplate('typescript', 'tsconfig')({}));
-    tryEmit(files, warnings, 'README.md', () =>
-      getTemplate('typescript', 'readme')({
-        ...enriched.meta,
-        groups: enriched.groups,
-        schemas: enriched.schemas,
-        securitySchemes: enriched.securitySchemes,
-        hasSSE,
-      }));
+    emit("package.json", getTemplate("typescript", "package-json"), {
+      ...enriched.meta,
+      packageVersion: resolvedPackageVersion,
+      externalPackages,
+    });
 
-    // Format TypeScript files
-    const formatted: EmittedFile[] = [];
-    for (const file of files) {
-      if (file.relativePath.endsWith('.ts')) {
-        formatted.push({ ...file, content: await formatTypeScript(file.content) });
-      } else {
-        formatted.push(file);
-      }
-    }
+    emit("tsconfig.json", getTemplate("typescript", "tsconfig"), {});
+    emit("README.md", getTemplate("typescript", "readme"), {
+      ...enriched.meta,
+      groups: visibleGroups,
+      schemas,
+      securitySchemes: enriched.securitySchemes,
+      hasSSE,
+    });
 
-    return { files: formatted, warnings };
+    // ── Parallel formatting (major performance win) ────────────────────────
+    const formatted = await Promise.all(
+      files.map(async (f) => {
+        if (!f.relativePath.endsWith(".ts")) return f;
+        return {
+          ...f,
+          content: await formatTypeScript(f.content),
+        };
+      }),
+    );
+
+    return {
+      files: formatted,
+      warnings,
+    };
   }
 }
 
-function tryEmit(
-  files: EmittedFile[],
-  warnings: string[],
-  relativePath: string,
-  render: () => string,
-): void {
-  try {
-    files.push({ relativePath, content: render() });
-  } catch (err) {
-    warnings.push(`${relativePath}: ${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-
-// ── Adapter-level npm version resolution ─────────────────────────────────────
-
-/**
- * Queries the npm registry for the latest published version of the package,
- * then returns a patch-bumped version string.
- *
- * - If the package has never been published (404), returns `fallback` unchanged.
- * - If the registry is unreachable or returns an error, emits a warning and
- *   returns `fallback` unchanged.
- */
-async function resolveNpmPackageVersion(
+// ─────────────────────────────────────────────────────────────────────────────
+function resolveNpmPackageVersion(
   packageName: string,
   fallback: string,
   warnings: string[],
+  npmToken?: string,
 ): Promise<string> {
-  try {
-    const url = `https://registry.npmjs.org/${encodeURIComponent(packageName)}/latest`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(8_000) });
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+  };
+  if (npmToken) {
+    headers["Authorization"] = `Bearer ${npmToken}`;
+  }
 
-    if (res.status === 404) {
-      // Package not yet published — first release, keep the manifest version.
-      return fallback;
-    }
-
-    if (!res.ok) {
+  return fetch(
+    `https://registry.npmjs.org/${encodeURIComponent(packageName)}/latest`,
+    {
+      signal: AbortSignal.timeout(8000),
+      headers,
+    },
+  )
+    .then(async (res) => {
+      if (res.status === 404) return fallback;
+      if (!res.ok) {
+        warnings.push(
+          `npm registry error ${res.status} for ${packageName}, using fallback`,
+        );
+        return fallback;
+      }
+      const data = (await res.json()) as { version?: string };
+      if (!data.version) return fallback;
+      return bumpPatch(data.version);
+    })
+    .catch((err) => {
       warnings.push(
-        `npm registry returned ${res.status} for "${packageName}"; using manifest version "${fallback}".`,
+        `npm registry unreachable for ${packageName}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
       );
       return fallback;
-    }
-
-    const data = (await res.json()) as { version?: string };
-    if (!data.version) return fallback;
-
-    return bumpPatch(data.version);
-  } catch (err) {
-    warnings.push(
-      `Could not reach npm registry for "${packageName}": ${
-        err instanceof Error ? err.message : String(err)
-      }. Using manifest version "${fallback}".`,
-    );
-    return fallback;
-  }
+    });
 }
 
-/**
- * Increments the patch segment of a semver string.
- * Pre-release / build metadata suffixes are stripped before bumping.
- * Returns the original string unchanged if it cannot be parsed.
- *
- * Examples: 1.2.3 → 1.2.4 | 1.2.3-alpha.1 → 1.2.4
- */
 function bumpPatch(version: string): string {
-  // Strip pre-release and build-metadata suffixes
-  const base = version.split('-')[0].split('+')[0];
-  const parts = base.split('.');
+  const base = version.split("-")[0].split("+")[0];
+  const parts = base.split(".");
   if (parts.length !== 3) return version;
-  const patch = parseInt(parts[2], 10);
-  if (isNaN(patch)) return version;
+
+  const patch = Number(parts[2]);
+  if (!Number.isFinite(patch)) return version;
+
   return `${parts[0]}.${parts[1]}.${patch + 1}`;
 }

@@ -20,14 +20,20 @@ export { SDKError } from './errors.js';
 export type * from './{{this}}.js';
 {{/each}}
 {{/if}}
+{{#if includeModels}}
+export type * from './models.js';
+{{/if}}
 {{#if externalImports.length}}
 
 // ── External schema imports ──────────────────────────
 {{#each externalImports}}
+{{#if exports.length}}
 export type { {{#each exports}}{{#if @index}}, {{/if}}{{exportName}}{{#if alias}} as {{alias}}{{/if}}{{/each}} } from '{{importPath}}';
+{{else}}
+export type * from '{{importPath}}';
+{{/if}}
 {{#if runtimeImportPath}}
 export { {{#each runtimeExports}}{{#if @index}}, {{/if}}{{exportName}}{{#if alias}} as {{alias}}{{/if}}{{/each}} } from '{{runtimeImportPath}}';
 {{/if}}
 {{/each}}
 {{/if}}
-export type * from './models.js';

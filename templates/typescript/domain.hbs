@@ -6,7 +6,7 @@
 
 import type { SDKTransport, RequestOptions } from '../transport/axios.js';
 {{#if hasSSE}}
-import { createSSEStream, type SSEEvent, type SSEOptions } from '../transport/sse.js';
+import { createSSEStream, type SSEEvent, type SSEOptions, type SSEClientConfig } from '../transport/sse.js';
 {{/if}}
 {{#if imports.length}}
 import type {
@@ -25,7 +25,7 @@ export interface {{interfaceName}} {
   {{name}}{{{sseMethodSignature this}}};
 {{else}}
   {{#if deprecated}}
-  /** @deprecated {{#if summary}}{{summary}}{{#if description}} — {{description}}{{/if}}{{else if description}}{{description}}{{/if}} */
+  /** @deprecated {{#if deprecationMessage}}{{deprecationMessage}}{{else if summary}}{{summary}}{{#if description}} — {{description}}{{/if}}{{else if description}}{{description}}{{/if}} */
   {{else if (or summary description)}}
   /** {{#if summary}}{{summary}}{{#if description}} — {{description}}{{/if}}{{else}}{{description}}{{/if}} */
   {{/if}}
@@ -36,10 +36,38 @@ export interface {{interfaceName}} {
 }
 
 export function {{factoryName}}(transport: SDKTransport): {{interfaceName}} {
+{{#if hasSSE}}
+  const __buildSSEClientConfig = (): SSEClientConfig => {
+    const headers: Record<string, string> = {
+      ...(transport.config.defaultHeaders ?? {}),
+    };
+{{#each securitySchemes}}
+  {{#if (eq type "apiKey")}}
+    {{#if (eq in "header")}}
+    if (transport.config.{{configKey}}) headers['{{paramName}}'] = transport.config.{{configKey}};
+    {{/if}}
+  {{/if}}
+  {{#if (and (eq type "http") (eq scheme "bearer"))}}
+    if (transport.config.{{configKey}}) headers['Authorization'] = `Bearer ${ transport.config.{{configKey}} }`;
+  {{/if}}
+  {{#if (eq type "oauth2")}}
+    if (transport.config.{{configKey}}) headers['Authorization'] = `Bearer ${ transport.config.{{configKey}} }`;
+  {{/if}}
+  {{#if (eq type "openIdConnect")}}
+    if (transport.config.{{configKey}}) headers['Authorization'] = `Bearer ${ transport.config.{{configKey}} }`;
+  {{/if}}
+{{/each}}
+    return {
+      headers: Object.keys(headers).length > 0 ? headers : undefined,
+      cookies: transport.config.cookies,
+      withCredentials: transport.config.withCredentials,
+    };
+  };
+{{/if}}
   return {
 {{#each operations}}
 {{#if (isEventStream this)}}
-    {{name}}{{{sseMethodParams this}}}: AsyncIterable<SSEEvent<{{{sseEventType this}}}>> {
+    {{name}}{{{sseMethodParams this}}}: {{#if sseReturnType}}AsyncIterable<{{sseReturnType}}>{{else}}AsyncIterable<SSEEvent<{{{sseEventType this}}}>>{{/if}} {
       const sseUrl = new URL(`{{path}}`, transport.config.baseUrl);
 {{#if (hasQueryParams this)}}
       if (query) {
@@ -61,7 +89,7 @@ export function {{factoryName}}(transport: SDKTransport): {{interfaceName}} {
 {{#if (hasRequestBody this)}}
       sseHeaders['Content-Type'] = '{{requestBody.contentType}}';
 {{/if}}
-{{#if headerParams.length}}
+{{#if (and headerParams.length headerType)}}
       if (headerOptions) {
 {{#each headerParams}}
         if (headerOptions.{{name}} !== undefined && headerOptions.{{name}} !== null) {
@@ -84,7 +112,7 @@ export function {{factoryName}}(transport: SDKTransport): {{interfaceName}} {
       }
 {{/if}}
 {{/if}}
-      return createSSEStream<{{{sseEventType this}}}>(
+      return createSSEStream<{{#if sseReturnType}}{{sseReturnType}}{{else}}SSEEvent<{{{sseEventType this}}}>{{/if}}>(
         sseUrl.toString(),
         {
           method: '{{httpMethod}}',
@@ -96,6 +124,7 @@ export function {{factoryName}}(transport: SDKTransport): {{interfaceName}} {
 {{/if}}
         },
         undefined,
+        __buildSSEClientConfig(),
         options,
       );
     },
@@ -118,7 +147,7 @@ export function {{factoryName}}(transport: SDKTransport): {{interfaceName}} {
 {{#if (and (hasRequestBody this) (and (neq requestBody.contentType "application/json") (neq requestBody.contentType "multipart/form-data")))}}
       requestHeaders['Content-Type'] = '{{requestBody.contentType}}';
 {{/if}}
-{{#if headerParams.length}}
+{{#if (and headerParams.length headerType)}}
       if (headerOptions) {
 {{#each headerParams}}
         if (headerOptions.{{name}} !== undefined && headerOptions.{{name}} !== null) {
@@ -155,7 +184,11 @@ export function {{factoryName}}(transport: SDKTransport): {{interfaceName}} {
           headers: Object.keys(requestHeaders).length > 0 ? requestHeaders : undefined,
 {{/if}}
         },
+{{#if timeout}}
+        { timeoutMs: {{timeout}}, ...options },
+{{else}}
         options,
+{{/if}}
       );
     },
 

@@ -93,6 +93,22 @@ export type SSERequestInit = Omit<RequestInit, 'headers'> & {
   headers?: Record<string, string>;
 };
 
+/**
+ * Client-level credentials inherited from the SDK transport configuration.
+ * Applied as defaults to every SSE fetch request; per-request headers take precedence.
+ */
+export interface SSEClientConfig {
+  /** Default headers (auth tokens, API keys, etc.) merged into every SSE request */
+  headers?: Record<string, string>;
+  /** Static cookie key/value pairs sent with every SSE request */
+  cookies?: Record<string, string>;
+  /**
+   * Send credentials (cookies, HTTP auth) on cross-origin requests.
+   * When true, sets fetch `credentials: 'include'`. Default: same-origin.
+   */
+  withCredentials?: boolean;
+}
+
 // ── SSE Parser ───────────────────────────────────────
 
 /**
@@ -204,6 +220,9 @@ const DEFAULT_MAX_BUFFER = 5 * 1024 * 1024; // 5MB
  * @example
  * ```ts
  * const stream = createSSEStream<MyEvent>(url, { method: 'GET' }, undefined, {
+ *   headers: { Authorization: 'Bearer token' },
+ *   withCredentials: true,
+ * }, {
  *   signal: controller.signal,
  *   eventTypes: ['update', 'complete'],
  *   heartbeatTimeoutMs: 30000,
@@ -216,12 +235,13 @@ const DEFAULT_MAX_BUFFER = 5 * 1024 * 1024; // 5MB
  * }
  * ```
  */
-export async function* createSSEStream<T>(
+export async function* createSSEStream<TEvent extends SSEEvent<unknown> = SSEEvent<Record<string, unknown>>>(
   url: string,
   init: SSERequestInit,
   reconnect?: Partial<SSEReconnectConfig>,
+  clientConfig?: SSEClientConfig,
   options?: SSEOptions,
-): AsyncIterable<SSEEvent<T>> {
+): AsyncIterable<TEvent> {
   const rc: SSEReconnectConfig = { ...DEFAULT_RECONNECT, ...reconnect };
   const maxBuffer = options?.maxBufferSize ?? DEFAULT_MAX_BUFFER;
   let lastEventId: string | undefined;
@@ -233,12 +253,27 @@ export async function* createSSEStream<T>(
       const headers: Record<string, string> = {
         Accept: 'text/event-stream',
         'Cache-Control': 'no-cache',
+        ...(clientConfig?.headers ?? {}),
         ...(init.headers ?? {}),
         ...(options?.headers ?? {}),
       };
 
       if (lastEventId) {
         headers['Last-Event-ID'] = lastEventId;
+      }
+
+      // Apply static cookies from client config
+      if (clientConfig?.cookies) {
+        const cookiePairs: string[] = [];
+        for (const [name, value] of Object.entries(clientConfig.cookies)) {
+          cookiePairs.push(`${encodeURIComponent(name)}=${encodeURIComponent(value)}`);
+        }
+        if (cookiePairs.length > 0) {
+          const existing = headers['Cookie'];
+          headers['Cookie'] = existing
+            ? `${existing}; ${cookiePairs.join('; ')}`
+            : cookiePairs.join('; ');
+        }
       }
 
       const controller = new AbortController();
@@ -260,6 +295,7 @@ export async function* createSSEStream<T>(
           ...init,
           headers,
           signal: controller.signal,
+          ...(clientConfig?.withCredentials ? { credentials: 'include' as RequestCredentials } : {}),
         });
 
         if (connectionTimeoutId) {
@@ -338,7 +374,7 @@ export async function* createSSEStream<T>(
                 continue;
               }
 
-              yield parseSSEEventData<T>(rawEvent, options?.parseData);
+              yield parseSSEEventData<TEvent>(rawEvent, options?.parseData) as TEvent;
             }
           }
         } finally {
