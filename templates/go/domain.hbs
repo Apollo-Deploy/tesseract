@@ -1,0 +1,89 @@
+package {{pkgName}}
+
+import (
+{{#if hasSSE}}
+	"bufio"
+	"strings"
+{{/if}}
+	"context"
+)
+
+// {{interfaceName}} provides access to {{name}} API operations.
+type {{interfaceName}} struct {
+	transport *Transport
+}
+
+{{#each operations}}
+{{#if isEventStream}}
+func (api *{{../interfaceName}}) {{pascalCase name}}Stream(
+	ctx context.Context,
+{{#each pathParams}}
+	{{name}} string,
+{{/each}}
+{{#if queryType}}
+	params {{goQueryType queryType}},
+{{/if}}
+) (<-chan SSEEvent, <-chan error) {
+	eventCh := make(chan SSEEvent)
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(eventCh)
+		defer close(errCh)
+		reqPath := buildPath("{{path}}"{{#each pathParams}}, "{{originalName}}", {{name}}{{/each}})
+		resp, err := api.transport.Stream(ctx, request{Method: "{{httpMethod}}", Path: reqPath})
+		if err != nil { errCh <- err; return }
+		defer resp.Body.Close()
+		scanner := bufio.NewScanner(resp.Body)
+		var current SSEEvent
+		for scanner.Scan() {
+			select {
+			case <-ctx.Done(): errCh <- ctx.Err(); return
+			default:
+			}
+			line := scanner.Text()
+			if line == "" {
+				if current.Data != "" { eventCh <- current; current = SSEEvent{} }
+				continue
+			}
+			if strings.HasPrefix(line, "event:") { current.Event = strings.TrimSpace(line[6:]) }
+			if strings.HasPrefix(line, "data:") { if current.Data != "" { current.Data += "\n" }; current.Data += strings.TrimSpace(line[5:]) }
+			if strings.HasPrefix(line, "id:") { current.ID = strings.TrimSpace(line[3:]) }
+		}
+	}()
+	return eventCh, errCh
+}
+
+{{else}}
+func (api *{{../interfaceName}}) {{pascalCase name}}(
+	ctx context.Context,
+{{#each pathParams}}
+	{{name}} string,
+{{/each}}
+{{#if requestBody}}
+	body *{{requestBody.type}},
+{{/if}}
+{{#if queryType}}
+	params {{goQueryType queryType}},
+{{/if}}
+) {{#if (eq responseType "void")}}error{{else}}(*{{responseType}}, error){{/if}} {
+	reqPath := buildPath("{{path}}"{{#each pathParams}}, "{{originalName}}", {{name}}{{/each}})
+	{{#if queryType}}q := buildQuery(params){{/if}}
+{{#if (eq responseType "void")}}
+	return api.transport.Execute(ctx, request{
+		Method: "{{httpMethod}}", Path: reqPath,
+{{#if queryType}}		Query: q,{{/if}}
+{{#if requestBody}}		Body: body,{{/if}}
+	}, nil)
+{{else}}
+	var result {{responseType}}
+	err := api.transport.Execute(ctx, request{
+		Method: "{{httpMethod}}", Path: reqPath,
+{{#if queryType}}		Query: q,{{/if}}
+{{#if requestBody}}		Body: body,{{/if}}
+	}, &result)
+	if err != nil { return nil, err }
+	return &result, nil
+{{/if}}
+}
+{{/if}}
+{{/each}}

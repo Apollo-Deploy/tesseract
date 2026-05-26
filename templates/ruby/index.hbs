@@ -1,0 +1,54 @@
+# frozen_string_literal: true
+
+require_relative "{{snakeModule}}/version"
+require_relative "{{snakeModule}}/errors"
+require_relative "{{snakeModule}}/transport"
+require_relative "{{snakeModule}}/types"
+require_relative "{{snakeModule}}/client"
+{{#each groups}}
+require_relative "{{../snakeModule}}/resources/{{fileName}}"
+{{/each}}
+
+module {{pascalCase snakeModule}}
+  # Factory method to create a new client instance.
+  #
+  # @param base_url [String] the base URL for the API
+  # @param timeout [Integer] request timeout in seconds (default: 15)
+  # @param retries [Hash] retry configuration
+  # @option retries [Integer] :attempts (3)
+  # @option retries [Float] :backoff (0.4)
+  # @option retries [Boolean] :jitter (true)
+  # @option retries [Float] :max_backoff (30.0)
+  {{#each securitySchemes}}
+  # @param {{camelCase name}} [String, nil] {{#if description}}{{description}}{{else}}credential for {{name}}{{/if}}
+  {{/each}}
+  {{#if hasSSE}}
+  # @param sse_client [Object, nil] optional SSE client implementation
+  {{/if}}
+  # @return [{{pascalCase meta.clientName}}::Client]
+  def self.create_client(
+    base_url: '{{meta.baseUrl}}',
+    timeout: 15,
+    retries: { attempts: 3, backoff: 0.4, jitter: true, max_backoff: 30.0 },
+    {{#each securitySchemes}}
+    {{camelCase name}}: nil,
+    {{/each}}
+    {{#if hasSSE}}
+    sse_client: nil,
+    {{/if}}
+    **extra
+  )
+    {{pascalCase meta.clientName}}::Client.new(
+      base_url: base_url,
+      timeout: timeout,
+      retries: retries,
+      {{#each securitySchemes}}
+      {{camelCase name}}: {{camelCase name}},
+      {{/each}}
+      {{#if hasSSE}}
+      sse_client: sse_client,
+      {{/if}}
+      **extra
+    )
+  end
+end

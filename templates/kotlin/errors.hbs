@@ -1,0 +1,42 @@
+package {{packageName}}
+
+/**
+ * Primary exception type for the {{packageName}} SDK.
+ *
+ * All API methods throw [SdkException] on failure.
+ */
+class SdkException(
+    /** HTTP status code, if this is an API error. */
+    val status: Int?,
+    /** Machine-readable error code (if available). */
+    val code: String?,
+    /** Human-readable error message. */
+    override val message: String,
+    /** Server-assigned request ID for support. */
+    val requestId: String?,
+    /** The underlying cause, if any. */
+    cause: Throwable? = null,
+) : Exception(message, cause) {
+
+    /** Returns `true` if this error was caused by the server (5xx). */
+    fun isServerError(): Boolean = status != null && status in 500..599
+
+    /** Returns `true` if this error was caused by the client (4xx). */
+    fun isClientError(): Boolean = status != null && status in 400..499
+
+    /** Returns `true` if this is a network error (should be retried safely). */
+    fun isNetworkError(): Boolean = status == null
+
+    /** Returns `true` if this error is retryable. */
+    fun isRetryable(): Boolean = isNetworkError() || status in setOf(429, 502, 503, 504)
+
+    override fun toString(): String {
+        val sb = StringBuilder("SdkException(")
+        if (status != null) sb.append("status=$status, ")
+        if (code != null) sb.append("code='$code', ")
+        sb.append("message='$message'")
+        if (requestId != null) sb.append(", requestId='$requestId'")
+        sb.append(")")
+        return sb.toString()
+    }
+}

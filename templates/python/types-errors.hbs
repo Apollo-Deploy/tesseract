@@ -1,0 +1,75 @@
+"""Error classes for {{moduleName}}."""
+
+from typing import Optional, Dict, Any
+
+
+class SDKError(Exception):
+    """Structured error thrown by all SDK operations."""
+
+    def __init__(
+        self,
+        message: str,
+        status: int,
+        code: str,
+        request_id: Optional[str] = None,
+        timestamp: Optional[str] = None,
+        path: Optional[str] = None,
+        method: Optional[str] = None,
+        hint: Optional[str] = None,
+        details: Optional[Any] = None,
+    ):
+        super().__init__(message)
+        self.message = message
+        self.status = status
+        self.code = code
+        self.request_id = request_id
+        self.timestamp = timestamp
+        self.path = path
+        self.method = method
+        self.hint = hint
+        self.details = details
+
+    def is_rate_limited(self) -> bool:
+        return self.code == "rate_limit_exceeded"
+
+    def is_auth_error(self) -> bool:
+        return self.code in ("unauthorized", "credential_expired", "credential_revoked")
+
+    def is_forbidden(self) -> bool:
+        return self.code == "forbidden"
+
+    def is_not_found(self) -> bool:
+        return self.code == "not_found"
+
+    def is_validation_error(self) -> bool:
+        return self.code in (
+            "validation_failed",
+            "request_validation_failed",
+            "bad_request",
+            "unprocessable_entity",
+        )
+
+    def is_server_error(self) -> bool:
+        return self.status >= 500
+
+    def is_client_error(self) -> bool:
+        return 400 <= self.status < 500
+
+    def is_retryable(self) -> bool:
+        return (
+            self.code in ("network_error", "gateway_timeout")
+            or self.status == 429
+            or self.status >= 500
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "message": self.message,
+            "status": self.status,
+            "code": self.code,
+            "request_id": self.request_id,
+            "timestamp": self.timestamp,
+            "path": self.path,
+            "method": self.method,
+            "hint": self.hint,
+        }

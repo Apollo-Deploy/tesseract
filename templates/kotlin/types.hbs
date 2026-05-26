@@ -1,0 +1,100 @@
+package {{packageName}}
+
+import kotlinx.serialization.*
+import kotlinx.serialization.descriptors.*
+import kotlinx.serialization.encoding.*
+import kotlinx.serialization.json.*
+
+{{#each schemas}}
+{{#if (not ownership)}}
+{{#unless (or externalImport (eq ownership.kind "external"))}}
+{{#if (not isEnum)}}
+{{#if (not isUnionType)}}
+{{#if (not isIntersectionType)}}
+{{#if (not isTypeAlias)}}
+{{#if description}}
+/**
+ * {{description}}
+ */
+{{/if}}
+@Serializable
+data class {{name}}(
+    {{#each properties}}
+    {{#if description}}
+    /** {{description}} */
+    {{/if}}
+    {{#if deprecated}}
+    @Deprecated("{{#if deprecationMessage}}{{deprecationMessage}}{{else}}Use a different property.{{/if}}")
+    {{/if}}
+    {{#if (and nullable (not required))}}
+    @SerialName("{{name}}")
+    val {{name}}: {{{kotlinType type}}}? = null,
+    {{else if nullable}}
+    @SerialName("{{name}}")
+    val {{name}}: {{{kotlinType type}}}? = null,
+    {{else if required}}
+    @SerialName("{{name}}")
+    val {{name}}: {{{kotlinType type}}},
+    {{else}}
+    @SerialName("{{name}}")
+    val {{name}}: {{{kotlinType type}}}? = null,
+    {{/if}}
+    {{/each}}
+)
+{{/if}}
+{{/if}}
+{{/if}}
+{{/if}}
+{{/unless}}
+{{/if}}
+
+{{#if isEnum}}
+{{#if description}}
+/**
+ * {{description}}
+ */
+{{/if}}
+@Serializable
+enum class {{name}} {
+    {{#each enumValues}}
+    @SerialName("{{this}}")
+    {{pascalCase this}},
+    {{/each}}
+}
+{{/if}}
+
+{{#if isUnionType}}
+{{#if unionMembers.length}}
+{{#if description}}
+/**
+ * {{description}}
+ */
+{{/if}}
+@Serializable
+sealed class {{name}} {
+    {{#each unionMembers}}
+    @Serializable
+    data class {{pascalCase this}}(val value: {{{kotlinType this}}}) : {{../name}}()
+    {{/each}}
+}
+{{/if}}
+{{/if}}
+
+{{#if isIntersectionType}}
+{{#if intersectionMembers.length}}
+{{#if description}}
+/**
+ * {{description}}
+ */
+{{/if}}
+{{! Intersection type — emit as interface implemented by concrete types }}
+@Serializable
+data class {{name}}(
+    // Intersection of: {{join intersectionMembers ", "}}
+    // Fields from all intersected types should be inlined here.
+    // TODO: generate combined fields
+)
+{{/if}}
+{{/if}}
+
+{{/each}}

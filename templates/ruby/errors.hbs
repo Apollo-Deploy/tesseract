@@ -1,0 +1,150 @@
+# frozen_string_literal: true
+
+module {{pascalCase meta.clientName}}
+  # Structured error raised on API and network failures.
+  #
+  # Inherits from StandardError and provides structured access to error
+  # details including status code, error code, request ID, and convenience
+  # methods for common error classifications.
+  #
+  # @example Basic error handling
+  #   begin
+  #     client.users.get_user(id: "123")
+  #   rescue {{pascalCase meta.clientName}}::SDKError => e
+  #     puts "Error #{e.status}: #{e.message} (#{e.code})"
+  #     puts "Request ID: #{e.request_id}" if e.request_id
+  #
+  #     if e.rate_limited?
+  #       sleep 1
+  #       retry
+  #     end
+  #
+  #     if e.server_error?
+  #       # Log and alert
+  #     end
+  #   end
+  class SDKError < StandardError
+    # @return [String] machine-readable error code (e.g. "not_found", "rate_limit_exceeded")
+    attr_reader :code
+
+    # @return [Integer] HTTP status code (0 for network errors)
+    attr_reader :status
+
+    # @return [String, nil] unique request identifier from the server
+    attr_reader :request_id
+
+    # @return [String, nil] ISO 8601 timestamp of error occurrence
+    attr_reader :timestamp
+
+    # @return [String, nil] request path that caused the error
+    attr_reader :path
+
+    # @return [String, nil] HTTP method that caused the error
+    attr_reader :method
+
+    # @return [String, nil] helpful hint for resolving the error
+    attr_reader :hint
+
+    # @return [Hash, nil] structured error details
+    attr_reader :details
+
+    # Create a new SDKError.
+    #
+    # @param message [String] human-readable error message
+    # @param status [Integer] HTTP status code (0 for network errors)
+    # @param code [String] machine-readable error code
+    # @param request_id [String, nil] server-provided request ID
+    # @param timestamp [String, nil] error timestamp
+    # @param path [String, nil] request path
+    # @param method [String, nil] HTTP method
+    # @param hint [String, nil] resolution hint
+    # @param details [Hash, nil] structured error details
+    def initialize(
+      message,
+      status = 0,
+      code = "unknown_error",
+      request_id: nil,
+      timestamp: nil,
+      path: nil,
+      method: nil,
+      hint: nil,
+      details: nil
+    )
+      super(message)
+
+      @code = code
+      @status = status
+      @request_id = request_id
+      @timestamp = timestamp
+      @path = path
+      @method = method
+      @hint = hint
+      @details = details
+    end
+
+    # @return [Boolean] true if the error is a rate limit (HTTP 429)
+    def rate_limited?
+      @code == "rate_limit_exceeded" || @status == 429
+    end
+
+    # @return [Boolean] true if the error is authentication-related
+    def auth_error?
+      %w[unauthorized credential_expired credential_revoked].include?(@code)
+    end
+
+    # @return [Boolean] true if the error is a permission error (HTTP 403)
+    def forbidden?
+      @code == "forbidden" || @status == 403
+    end
+
+    # @return [Boolean] true if the resource was not found (HTTP 404)
+    def not_found?
+      @code == "not_found" || @status == 404
+    end
+
+    # @return [Boolean] true if the error is a validation error
+    def validation_error?
+      %w[validation_failed request_validation_failed bad_request unprocessable_entity].include?(@code) ||
+        @status == 422
+    end
+
+    # @return [Boolean] true if status is 5xx (server error)
+    def server_error?
+      @status >= 500
+    end
+
+    # @return [Boolean] true if status is 4xx (client error)
+    def client_error?
+      @status >= 400 && @status < 500
+    end
+
+    # @return [Boolean] true if this error is safe to retry
+    def retryable?
+      @code == "network_error" ||
+        @code == "gateway_timeout" ||
+        @status == 429 ||
+        @status >= 500
+    end
+
+    # @return [Hash] a hash representation for logging and serialization
+    def to_h
+      {
+        name: "SDKError",
+        message: message,
+        status: @status,
+        code: @code,
+        request_id: @request_id,
+        timestamp: @timestamp,
+        path: @path,
+        method: @method,
+        hint: @hint,
+        details: @details
+      }.compact
+    end
+
+    # @return [String] JSON representation for logging
+    def to_json(*args)
+      to_h.to_json(*args)
+    end
+  end
+end

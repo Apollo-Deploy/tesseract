@@ -1,0 +1,80 @@
+package {{pkgName}}
+
+{{#if schemas}}
+import (
+	"time"
+)
+{{/if}}
+
+{{#each schemas}}
+{{#if (neq ownership.kind "external")}}
+{{#if isEnum}}
+// {{name}} {{#if description}}{{description}}{{/if}}
+type {{name}} string
+
+const (
+{{#each enumValues}}
+	{{pascalCase ../name}}{{pascalCase this}} {{../name}} = "{{this}}"
+{{/each}}
+)
+
+{{else if isUnionType}}
+// {{name}} {{#if description}}{{description}}{{/if}}
+type {{name}} struct {
+	value interface{}
+}
+
+{{#each unionMembers}}
+// New{{../name}}From{{this}} creates a {{../name}} from a {{this}} value.
+func New{{../name}}From{{this}}(v {{this}}) {{../name}} {
+	return {{../name}}{value: v}
+}
+{{/each}}
+
+// Value returns the underlying value.
+func (u {{name}}) Value() interface{} {
+	return u.value
+}
+
+// UnmarshalJSON implements json.Unmarshaler for {{name}}.
+func (u *{{name}}) UnmarshalJSON(data []byte) error {
+{{#each unionMembers}}
+	var v{{@index}} {{this}}
+	if err := json.Unmarshal(data, &v{{@index}}); err == nil {
+		u.value = v{{@index}}
+		return nil
+	}
+{{/each}}
+	return fmt.Errorf("unable to unmarshal {{name}} from %s", string(data))
+}
+
+// MarshalJSON implements json.Marshaler for {{name}}.
+func (u {{name}}) MarshalJSON() ([]byte, error) {
+	return json.Marshal(u.value)
+}
+
+{{else if isIntersectionType}}
+// {{name}} {{#if description}}{{description}}{{/if}}
+type {{name}} struct {
+{{#each intersectionMembers}}
+	{{this}}
+{{/each}}
+}
+
+{{else if isTypeAlias}}
+// {{name}} {{#if description}}{{description}}{{/if}}
+type {{name}} = {{additionalPropertiesType}}
+
+{{else}}
+{{#if description}}
+// {{name}} {{description}}
+{{/if}}
+type {{name}} struct {
+{{#each properties}}
+	{{pascalCase name}} {{#if (or nullable (not required))}}*{{/if}}{{#if (eq type "string")}}{{#if (eq format "date-time")}}time.Time{{else}}string{{/if}}{{else if (eq type "integer")}}int{{else if (eq type "number")}}float64{{else if (eq type "boolean")}}bool{{else}}{{goPropertyType type}}{{/if}} `json:"{{name}}{{#if (or nullable (not required))}},omitempty{{/if}}"`{{#if description}} // {{description}}{{/if}}
+{{/each}}
+}
+{{/if}}
+
+{{/if}}
+{{/each}}

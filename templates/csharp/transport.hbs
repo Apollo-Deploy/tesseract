@@ -1,0 +1,291 @@
+namespace {{namespace}};
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+
+/// <summary>
+/// Configuration for the HTTP transport layer.
+/// </summary>
+public class TransportConfig
+{
+    public string BaseUrl { get; set; } = "";
+{{#each securitySchemes}}
+    public string? {{pascalCase configKey}} { get; set; }
+{{/each}}
+    public int TimeoutMs { get; set; } = 15000;
+    public int MaxRetries { get; set; } = 3;
+    public Dictionary<string, string>? DefaultHeaders { get; set; }
+}
+
+/// <summary>
+/// Low-level HTTP transport handling authentication, serialization, retries, and error normalization.
+/// </summary>
+public class Transport
+{
+    private readonly TransportConfig _config;
+    private readonly HttpClient _httpClient;
+    private static readonly JsonSerializerOptions _jsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+    };
+
+    public Transport(TransportConfig config)
+    {
+        _config = config;
+        _httpClient = new HttpClient
+        {
+            Timeout = TimeSpan.FromMilliseconds(config.TimeoutMs),
+        };
+    }
+
+    public class Request
+    {
+        public HttpMethod Method { get; set; } = HttpMethod.Get;
+        public string Path { get; set; } = "";
+        public Dictionary<string, string>? Query { get; set; }
+        public object? Body { get; set; }
+        public string? ContentType { get; set; }
+        public Dictionary<string, string>? Headers { get; set; }
+    }
+
+    public async Task<T> ExecuteAsync<T>(Request request, CancellationToken cancellationToken = default)
+    {
+        return await ExecuteWithRetriesAsync<T>(request, _config.MaxRetries, cancellationToken);
+    }
+
+    public async Task<byte[]> ExecuteRawAsync(Request request, CancellationToken cancellationToken = default)
+    {
+        return await ExecuteRawWithRetriesAsync(request, _config.MaxRetries, cancellationToken);
+    }
+
+    public async Task<HttpResponseMessage> StreamAsync(Request request, CancellationToken cancellationToken = default)
+    {
+        using var httpRequest = BuildRequest(request);
+        var response = await _httpClient.SendAsync(
+            httpRequest,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw ParseErrorResponse(response, errorBody);
+        }
+        return response;
+    }
+
+    private async Task<T> ExecuteWithRetriesAsync<T>(
+        Request request, int maxRetries, CancellationToken cancellationToken)
+    {
+        Exception? lastException = null;
+        for (int attempt = 0; attempt <= maxRetries; attempt++)
+        {
+            if (attempt > 0)
+            {
+                var backoff = (int)Math.Pow(2, attempt - 1) * 200;
+                var jitter = Random.Shared.Next(backoff / 2);
+                await Task.Delay(backoff + jitter, cancellationToken);
+            }
+            try
+            {
+                using var httpRequest = BuildRequest(request);
+                using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (response.IsSuccessStatusCode)
+                {
+                    if (string.IsNullOrEmpty(body)) return default!;
+                    var result = JsonSerializer.Deserialize<T>(body, _jsonOptions);
+                    if (result == null)
+                        throw new SdkException((int)response.StatusCode, "DESERIALIZE_ERROR",
+                            "Failed to deserialize response body", GetRequestId(response));
+                    return result;
+                }
+                if ((int)response.StatusCode >= 500 && attempt < maxRetries)
+                {
+                    lastException = ParseErrorResponse(response, body);
+                    continue;
+                }
+                throw ParseErrorResponse(response, body);
+            }
+            catch (SdkException) { throw; }
+            catch (TaskCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception ex) when (IsRetryable(ex) && attempt < maxRetries) { lastException = ex; }
+            catch (Exception ex)
+            {
+                throw new SdkException(0, "REQUEST_ERROR", ex.Message, null, ex);
+            }
+        }
+        throw new SdkException(0, "MAX_RETRIES_EXCEEDED",
+            "Request failed after " + (maxRetries + 1) + " attempts", null, lastException);
+    }
+
+    private async Task<byte[]> ExecuteRawWithRetriesAsync(
+        Request request, int maxRetries, CancellationToken cancellationToken)
+    {
+        Exception? lastException = null;
+        for (int attempt = 0; attempt <= maxRetries; attempt++)
+        {
+            if (attempt > 0)
+            {
+                var backoff = (int)Math.Pow(2, attempt - 1) * 200;
+                var jitter = Random.Shared.Next(backoff / 2);
+                await Task.Delay(backoff + jitter, cancellationToken);
+            }
+            try
+            {
+                using var httpRequest = BuildRequest(request);
+                using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
+                var body = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+                if (response.IsSuccessStatusCode) return body;
+                var bodyString = Encoding.UTF8.GetString(body);
+                if ((int)response.StatusCode >= 500 && attempt < maxRetries)
+                {
+                    lastException = ParseErrorResponse(response, bodyString);
+                    continue;
+                }
+                throw ParseErrorResponse(response, bodyString);
+            }
+            catch (SdkException) { throw; }
+            catch (TaskCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception ex) when (IsRetryable(ex) && attempt < maxRetries) { lastException = ex; }
+            catch (Exception ex)
+            {
+                throw new SdkException(0, "REQUEST_ERROR", ex.Message, null, ex);
+            }
+        }
+        throw new SdkException(0, "MAX_RETRIES_EXCEEDED",
+            "Request failed after " + (maxRetries + 1) + " attempts", null, lastException);
+    }
+
+    private HttpRequestMessage BuildRequest(Request request)
+    {
+        var baseUri = new Uri(_config.BaseUrl.TrimEnd('/') + "/");
+        var fullUri = new Uri(baseUri, request.Path.TrimStart('/'));
+
+        if (request.Query?.Count > 0)
+        {
+            var queryString = string.Join("&",
+                request.Query.Select(kv =>
+                    Uri.EscapeDataString(kv.Key) + "=" + Uri.EscapeDataString(kv.Value)));
+            var separator = fullUri.Query.Length > 0 ? "&" : "";
+            fullUri = new Uri(fullUri, fullUri.PathAndQuery + separator + queryString);
+        }
+
+        var httpRequest = new HttpRequestMessage(request.Method, fullUri);
+
+        if (_config.DefaultHeaders != null)
+        {
+            foreach (var (key, value) in _config.DefaultHeaders)
+            {
+                httpRequest.Headers.TryAddWithoutValidation(key, value);
+            }
+        }
+
+{{#each securitySchemes}}
+{{#if (eq type "apiKey")}}
+{{#if (eq in "header")}}
+        if (!string.IsNullOrEmpty(_config.{{pascalCase configKey}}))
+            httpRequest.Headers.TryAddWithoutValidation("{{paramName}}", _config.{{pascalCase configKey}});
+{{/if}}
+{{#if (eq in "query")}}
+        if (!string.IsNullOrEmpty(_config.{{pascalCase configKey}}))
+        {
+            var sep = fullUri.Query.Length > 0 ? "&" : "";
+            fullUri = new Uri(fullUri, fullUri.PathAndQuery + sep + "{{paramName}}=" + Uri.EscapeDataString(_config.{{pascalCase configKey}}));
+            httpRequest.RequestUri = fullUri;
+        }
+{{/if}}
+{{/if}}
+{{#if (and (eq type "http") (eq scheme "bearer"))}}
+        if (!string.IsNullOrEmpty(_config.{{pascalCase configKey}}))
+            httpRequest.Headers.TryAddWithoutValidation("Authorization", "Bearer " + _config.{{pascalCase configKey}});
+{{/if}}
+{{#if (eq type "oauth2")}}
+        if (!string.IsNullOrEmpty(_config.{{pascalCase configKey}}))
+            httpRequest.Headers.TryAddWithoutValidation("Authorization", "Bearer " + _config.{{pascalCase configKey}});
+{{/if}}
+{{#if (eq type "openIdConnect")}}
+        if (!string.IsNullOrEmpty(_config.{{pascalCase configKey}}))
+            httpRequest.Headers.TryAddWithoutValidation("Authorization", "Bearer " + _config.{{pascalCase configKey}});
+{{/if}}
+{{/each}}
+
+        if (request.Body != null)
+        {
+            var contentType = request.ContentType ?? "application/json";
+            var json = JsonSerializer.Serialize(request.Body, _jsonOptions);
+            httpRequest.Content = new StringContent(json, Encoding.UTF8, contentType);
+        }
+
+        if (request.Headers != null)
+        {
+            foreach (var (key, value) in request.Headers)
+            {
+                if (key.Equals("Content-Type", StringComparison.OrdinalIgnoreCase) && httpRequest.Content != null)
+                {
+                    httpRequest.Content.Headers.ContentType =
+                        new System.Net.Http.Headers.MediaTypeHeaderValue(value);
+                }
+                else
+                {
+                    httpRequest.Headers.TryAddWithoutValidation(key, value);
+                }
+            }
+        }
+
+        return httpRequest;
+    }
+
+    private static bool IsRetryable(Exception ex)
+    {
+        return ex is HttpRequestException ||
+               ex is TaskCanceledException ||
+               ex is IOException ||
+               ex.Message.Contains("connection") ||
+               ex.Message.Contains("timeout") ||
+               ex.Message.Contains("reset");
+    }
+
+    private static SdkException ParseErrorResponse(HttpResponseMessage response, string body)
+    {
+        var requestId = GetRequestId(response);
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            var code = "";
+            var message = "";
+            if (root.TryGetProperty("code", out var codeEl)) code = codeEl.GetString() ?? "";
+            if (root.TryGetProperty("message", out var msgEl)) message = msgEl.GetString() ?? "";
+            else if (root.TryGetProperty("error", out var errEl)) message = errEl.GetString() ?? "";
+            if (string.IsNullOrEmpty(message)) message = body.Trim();
+            return new SdkException((int)response.StatusCode, code, message, requestId);
+        }
+        catch (JsonException)
+        {
+            return new SdkException((int)response.StatusCode, "",
+                string.IsNullOrWhiteSpace(body)
+                    ? "HTTP " + (int)response.StatusCode + ": " + response.ReasonPhrase
+                    : body.Trim(), requestId);
+        }
+    }
+
+    private static string? GetRequestId(HttpResponseMessage response)
+    {
+        if (response.Headers.TryGetValues("X-Request-ID", out var values))
+            return values.FirstOrDefault();
+        if (response.Headers.TryGetValues("x-request-id", out values))
+            return values.FirstOrDefault();
+        return null;
+    }
+}

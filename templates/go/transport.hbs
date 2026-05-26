@@ -1,0 +1,379 @@
+package {{pkgName}}
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math"
+	"math/rand"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+)
+
+// TransportConfig holds configuration for the HTTP transport layer.
+type TransportConfig struct {
+	BaseURL    string
+{{#each securitySchemes}}
+	{{pascalCase configKey}} string
+{{/each}}
+	Timeout    time.Duration
+	MaxRetries int
+	Headers    map[string]string
+}
+
+// Transport is the low-level HTTP client that handles authentication,
+// serialization, retries, and error normalization.
+type Transport struct {
+	config     TransportConfig
+	httpClient *http.Client
+}
+
+// NewTransport creates a new Transport with the given configuration.
+func NewTransport(cfg TransportConfig) *Transport {
+	return &Transport{
+		config: cfg,
+		httpClient: &http.Client{
+			Timeout: cfg.Timeout,
+		},
+	}
+}
+
+// request holds all the parameters for a single HTTP call.
+type request struct {
+	Method      string
+	Path        string
+	Query       url.Values
+	Body        interface{}
+	ContentType string
+	Headers     map[string]string
+}
+
+// Execute performs an HTTP request and unmarshals the response body into result.
+// result must be a non-nil pointer.
+func (t *Transport) Execute(ctx context.Context, req request, result interface{}) error {
+	return t.executeWithRetries(ctx, req, result, t.config.MaxRetries)
+}
+
+// ExecuteRaw performs an HTTP request and returns the raw response body bytes.
+func (t *Transport) ExecuteRaw(ctx context.Context, req request) ([]byte, error) {
+	return t.executeRawWithRetries(ctx, req, t.config.MaxRetries)
+}
+
+// executeWithRetries performs the request with exponential backoff retry logic.
+func (t *Transport) executeWithRetries(ctx context.Context, req request, result interface{}, maxRetries int) error {
+	var lastErr error
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			backoff := time.Duration(math.Pow(2, float64(attempt-1))) * 200 * time.Millisecond
+			jitter := time.Duration(rand.Int63n(int64(backoff / 2)))
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(backoff + jitter):
+			}
+		}
+
+		resp, body, err := t.doRequest(ctx, req)
+		if err != nil {
+			lastErr = err
+			if !isRetryable(err) {
+				return err
+			}
+			continue
+		}
+
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			if result != nil && len(body) > 0 {
+				if err := json.Unmarshal(body, result); err != nil {
+					return fmt.Errorf("failed to unmarshal response: %w", err)
+				}
+			}
+			return nil
+		}
+
+		if resp.StatusCode >= 500 && attempt < maxRetries {
+			lastErr = parseErrorResponse(resp, body)
+			continue
+		}
+
+		return parseErrorResponse(resp, body)
+	}
+
+	return lastErr
+}
+
+// executeRawWithRetries performs a raw request with retries.
+func (t *Transport) executeRawWithRetries(ctx context.Context, req request, maxRetries int) ([]byte, error) {
+	var lastErr error
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			backoff := time.Duration(math.Pow(2, float64(attempt-1))) * 200 * time.Millisecond
+			jitter := time.Duration(rand.Int63n(int64(backoff / 2)))
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(backoff + jitter):
+			}
+		}
+
+		resp, body, err := t.doRequest(ctx, req)
+		if err != nil {
+			lastErr = err
+			if !isRetryable(err) {
+				return nil, err
+			}
+			continue
+		}
+
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			return body, nil
+		}
+
+		if resp.StatusCode >= 500 && attempt < maxRetries {
+			lastErr = parseErrorResponse(resp, body)
+			continue
+		}
+
+		return nil, parseErrorResponse(resp, body)
+	}
+
+	return nil, lastErr
+}
+
+// doRequest builds and executes a single HTTP request.
+func (t *Transport) doRequest(ctx context.Context, req request) (*http.Response, []byte, error) {
+	// Build URL
+	base, err := url.Parse(t.config.BaseURL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid base URL: %w", err)
+	}
+
+	rel, err := url.Parse(req.Path)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid request path: %w", err)
+	}
+
+	fullURL := base.ResolveReference(rel)
+
+	if len(req.Query) > 0 {
+		fullURL.RawQuery = req.Query.Encode()
+	}
+
+	// Build body
+	var bodyReader io.Reader
+	if req.Body != nil {
+		bodyBytes, err := json.Marshal(req.Body)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to marshal request body: %w", err)
+		}
+		bodyReader = bytes.NewReader(bodyBytes)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, req.Method, fullURL.String(), bodyReader)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Set default headers
+	for k, v := range t.config.Headers {
+		httpReq.Header.Set(k, v)
+	}
+
+	// Set auth headers
+{{#each securitySchemes}}
+{{#if (eq type "apiKey")}}
+{{#if (eq in "header")}}
+	if t.config.{{pascalCase configKey}} != "" {
+		httpReq.Header.Set("{{paramName}}", t.config.{{pascalCase configKey}})
+	}
+{{/if}}
+{{#if (eq in "query")}}
+	if t.config.{{pascalCase configKey}} != "" {
+		q := httpReq.URL.Query()
+		q.Set("{{paramName}}", t.config.{{pascalCase configKey}})
+		httpReq.URL.RawQuery = q.Encode()
+	}
+{{/if}}
+{{/if}}
+{{#if (and (eq type "http") (eq scheme "bearer"))}}
+	if t.config.{{pascalCase configKey}} != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+t.config.{{pascalCase configKey}})
+	}
+{{/if}}
+{{#if (eq type "oauth2")}}
+	if t.config.{{pascalCase configKey}} != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+t.config.{{pascalCase configKey}})
+	}
+{{/if}}
+{{#if (eq type "openIdConnect")}}
+	if t.config.{{pascalCase configKey}} != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+t.config.{{pascalCase configKey}})
+	}
+{{/if}}
+{{/each}}
+
+	// Set content type
+	if req.ContentType != "" {
+		httpReq.Header.Set("Content-Type", req.ContentType)
+	} else if req.Body != nil {
+		httpReq.Header.Set("Content-Type", "application/json")
+	}
+
+	// Set custom headers
+	for k, v := range req.Headers {
+		httpReq.Header.Set(k, v)
+	}
+
+	resp, err := t.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return resp, nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	return resp, body, nil
+}
+
+// Stream executes an HTTP request and returns the response body for streaming.
+func (t *Transport) Stream(ctx context.Context, req request) (*http.Response, error) {
+	base, err := url.Parse(t.config.BaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid base URL: %w", err)
+	}
+
+	rel, err := url.Parse(req.Path)
+	if err != nil {
+		return nil, fmt.Errorf("invalid request path: %w", err)
+	}
+
+	fullURL := base.ResolveReference(rel)
+
+	if len(req.Query) > 0 {
+		fullURL.RawQuery = req.Query.Encode()
+	}
+
+	var bodyReader io.Reader
+	if req.Body != nil {
+		bodyBytes, err := json.Marshal(req.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal request body: %w", err)
+		}
+		bodyReader = bytes.NewReader(bodyBytes)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, req.Method, fullURL.String(), bodyReader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	for k, v := range t.config.Headers {
+		httpReq.Header.Set(k, v)
+	}
+
+{{#each securitySchemes}}
+{{#if (eq type "apiKey")}}
+{{#if (eq in "header")}}
+	if t.config.{{pascalCase configKey}} != "" {
+		httpReq.Header.Set("{{paramName}}", t.config.{{pascalCase configKey}})
+	}
+{{/if}}
+{{/if}}
+{{#if (and (eq type "http") (eq scheme "bearer"))}}
+	if t.config.{{pascalCase configKey}} != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+t.config.{{pascalCase configKey}})
+	}
+{{/if}}
+{{#if (eq type "oauth2")}}
+	if t.config.{{pascalCase configKey}} != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+t.config.{{pascalCase configKey}})
+	}
+{{/if}}
+{{/each}}
+
+	if req.ContentType != "" {
+		httpReq.Header.Set("Content-Type", req.ContentType)
+	} else if req.Body != nil {
+		httpReq.Header.Set("Content-Type", "application/json")
+	}
+
+	for k, v := range req.Headers {
+		httpReq.Header.Set(k, v)
+	}
+
+	resp, err := t.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return nil, parseErrorResponse(resp, body)
+	}
+
+	return resp, nil
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+// isRetryable returns true if the error indicates a transient failure.
+func isRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "temporary failure") ||
+		strings.Contains(msg, "EOF")
+}
+
+// parseErrorResponse builds an SDKError from an HTTP response.
+func parseErrorResponse(resp *http.Response, body []byte) error {
+	var requestID string
+	if rid := resp.Header.Get("X-Request-ID"); rid != "" {
+		requestID = rid
+	} else if rid := resp.Header.Get("x-request-id"); rid != "" {
+		requestID = rid
+	}
+
+	sdkErr := &SDKError{
+		Status:    resp.StatusCode,
+		RequestID: requestID,
+		Message:   strings.TrimSpace(string(body)),
+	}
+
+	// Try to extract a structured error code from the response body
+	var envelope struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+		Error   string `json:"error"`
+	}
+	if err := json.Unmarshal(body, &envelope); err == nil {
+		if envelope.Code != "" {
+			sdkErr.Code = envelope.Code
+		}
+		if envelope.Message != "" {
+			sdkErr.Message = envelope.Message
+		} else if envelope.Error != "" {
+			sdkErr.Message = envelope.Error
+		}
+	}
+
+	if sdkErr.Message == "" {
+		sdkErr.Message = fmt.Sprintf("HTTP %d: %s", resp.StatusCode, resp.Status)
+	}
+
+	return sdkErr
+}

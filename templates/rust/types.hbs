@@ -1,0 +1,142 @@
+use serde::{Deserialize, Serialize};
+
+{{#each schemas}}
+{{#if (and (not ownership) (not isEnum) (not isTypeAlias) (not isUnionType) (not isIntersectionType))}}
+{{#if (or externalImport (eq ownership.kind "external"))}}
+// {{name}} is imported from an external schema package.
+{{else}}
+{{#if description}}
+/// {{description}}
+{{/if}}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+{{#if additionalPropertiesType}}
+{{! Additional properties means we need to use a flattened map }}
+#[serde(rename_all = "camelCase")]
+pub struct {{name}} {
+    {{#each properties}}
+    {{#if description}}
+    /// {{description}}
+    {{/if}}
+    {{#if deprecated}}
+    #[deprecated]
+    {{/if}}
+    {{#if (and nullable (not required))}}
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub {{snakeCase name}}: Option<{{{rustType type}}}>,
+    {{else if nullable}}
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub {{snakeCase name}}: Option<{{{rustType type}}}>,
+    {{else if required}}
+    pub {{snakeCase name}}: {{{rustType type}}},
+    {{else}}
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub {{snakeCase name}}: Option<{{{rustType type}}}>,
+    {{/if}}
+    {{/each}}
+}
+{{else}}
+#[serde(rename_all = "camelCase")]
+pub struct {{name}} {
+    {{#each properties}}
+    {{#if description}}
+    /// {{description}}
+    {{/if}}
+    {{#if deprecated}}
+    #[deprecated]
+    {{/if}}
+    {{#if (and nullable (not required))}}
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub {{snakeCase name}}: Option<{{{rustType type}}}>,
+    {{else if nullable}}
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub {{snakeCase name}}: Option<{{{rustType type}}}>,
+    {{else if required}}
+    pub {{snakeCase name}}: {{{rustType type}}},
+    {{else}}
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub {{snakeCase name}}: Option<{{{rustType type}}}>,
+    {{/if}}
+    {{/each}}
+}
+{{/if}}
+{{/if}}
+{{/if}}
+
+{{#if isEnum}}
+{{#if description}}
+/// {{description}}
+{{/if}}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+{{#if enumValues}}
+#[serde(rename_all = "camelCase")]
+{{/if}}
+pub enum {{name}} {
+    {{#each enumValues}}
+    #[serde(rename = "{{this}}")]
+    {{pascalCase this}},
+    {{/each}}
+}
+{{/if}}
+
+{{#if isTypeAlias}}
+{{#if description}}
+/// {{description}}
+{{/if}}
+{{#if properties.length}}
+{{! Type alias with shape — emit as struct }}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct {{name}} {
+    {{#each properties}}
+    {{#if description}}
+    /// {{description}}
+    {{/if}}
+    {{#if required}}
+    pub {{snakeCase name}}: {{{rustType type}}},
+    {{else}}
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub {{snakeCase name}}: Option<{{{rustType type}}}>,
+    {{/if}}
+    {{/each}}
+}
+{{else}}
+{{! Simple type alias — skip, referenced by name }}
+// {{name}} is a type alias — referenced inline.
+{{/if}}
+{{/if}}
+
+{{#if isUnionType}}
+{{#if description}}
+/// {{description}}
+{{/if}}
+{{#if unionMembers.length}}
+{{! Union type with named members — emit as enum }}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum {{name}} {
+    {{#each unionMembers}}
+    {{pascalCase this}}({{{rustType this}}}),
+    {{/each}}
+}
+{{/if}}
+{{/if}}
+
+{{#if isIntersectionType}}
+{{#if description}}
+/// {{description}}
+{{/if}}
+{{#if intersectionMembers.length}}
+{{! Intersection type — flatten into a struct combining all members }}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct {{name}} {
+    {{#each intersectionMembers}}
+    // Fields from {{this}} are expected to be inlined by the code generator.
+    {{/each}}
+    // Intersection types require manual field specification.
+    // TODO: inline fields from {{join intersectionMembers ", "}}
+}
+{{/if}}
+{{/if}}
+
+{{/each}}

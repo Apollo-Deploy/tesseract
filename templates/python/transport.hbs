@@ -1,0 +1,191 @@
+"""HTTP transport layer for {{moduleName}}."""
+
+import time
+import json
+import random
+from typing import Optional, Dict, Any, Callable
+from urllib.parse import urlencode
+import httpx
+from .errors import SDKError
+
+
+class RequestOptions:
+    """Per-request options."""
+
+    def __init__(
+        self,
+        timeout_ms: Optional[int] = None,
+        headers: Optional[Dict[str, str]] = None,
+        signal: Optional[Any] = None,
+    ):
+        self.timeout_ms = timeout_ms
+        self.headers = headers or {}
+        self.signal = signal
+
+
+class SDKTransport:
+    """HTTP transport with retry, auth, and error handling."""
+
+    def __init__(
+        self,
+        base_url: str,
+{{#each securitySchemes}}
+        {{configKey}}: Optional[str] = None,
+{{/each}}
+        timeout_ms: int = 15000,
+        retries: int = 3,
+        default_headers: Optional[Dict[str, str]] = None,
+        on_request: Optional[Callable] = None,
+        on_response: Optional[Callable] = None,
+        on_error: Optional[Callable] = None,
+    ):
+        self.base_url = base_url.rstrip("/")
+{{#each securitySchemes}}
+        self._{{configKey}} = {{configKey}}
+{{/each}}
+        self.timeout_ms = timeout_ms
+        self.max_retries = retries
+        self.default_headers = default_headers or {}
+        self.on_request = on_request
+        self.on_response = on_response
+        self.on_error = on_error
+        self._client = httpx.Client(timeout=timeout_ms / 1000.0)
+
+    def _build_headers(self, extra_headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+        headers = {**self.default_headers}
+{{#each securitySchemes}}
+{{#if (eq type "apiKey")}}
+        if self._{{configKey}}:
+            headers["{{paramName}}"] = self._{{configKey}}
+{{/if}}
+{{#if (and (eq type "http") (eq scheme "bearer"))}}
+        if self._{{configKey}}:
+            headers["Authorization"] = "Bearer " + self._{{configKey}}
+{{/if}}
+{{#if (eq type "oauth2")}}
+        if self._{{configKey}}:
+            headers["Authorization"] = "Bearer " + self._{{configKey}}
+{{/if}}
+{{#if (eq type "openIdConnect")}}
+        if self._{{configKey}}:
+            headers["Authorization"] = "Bearer " + self._{{configKey}}
+{{/if}}
+{{/each}}
+        if extra_headers:
+            headers.update(extra_headers)
+        return headers
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        query: Optional[Dict[str, Any]] = None,
+        body: Optional[Any] = None,
+        content_type: str = "application/json",
+        options: Optional[RequestOptions] = None,
+    ) -> httpx.Response:
+        """Execute an HTTP request with retry logic."""
+        url = self.base_url + path
+        headers = self._build_headers(options.headers if options else None)
+        timeout = (options.timeout_ms if options and options.timeout_ms else self.timeout_ms) / 1000.0
+
+        if query:
+            filtered = {k: v for k, v in query.items() if v is not None}
+            if filtered:
+                url += "?" + urlencode(filtered)
+
+        data = None
+        if body is not None:
+            if content_type == "application/json":
+                data = json.dumps(body, default=str)
+                headers["Content-Type"] = "application/json"
+            else:
+                data = body
+
+        last_error = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                if self.on_request:
+                    self.on_request(method, url, attempt)
+
+                response = self._client.request(
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    content=data,
+                    timeout=timeout,
+                )
+
+                if self.on_response:
+                    self.on_response(response)
+
+                if response.status_code >= 400:
+                    self._handle_error_response(response)
+
+                return response
+
+            except httpx.TimeoutException as e:
+                last_error = SDKError("Request timed out: " + str(e), 0, "timeout")
+            except httpx.NetworkError as e:
+                last_error = SDKError("Network error: " + str(e), 0, "network_error")
+            except SDKError:
+                raise
+            except Exception as e:
+                last_error = SDKError("Request failed: " + str(e), 0, "unknown_error")
+
+            if attempt < self.max_retries:
+                delay = min(1000 * (2 ** attempt) + random.uniform(0, 500), 30000) / 1000.0
+                time.sleep(delay)
+
+        if self.on_error and last_error:
+            self.on_error(last_error)
+        raise last_error
+
+    def _handle_error_response(self, response: httpx.Response) -> None:
+        try:
+            body = response.json()
+            error_code = body.get("error", "unknown_error")
+            message = body.get("message", response.text)
+            request_id = body.get("request_id")
+            raise SDKError(message, response.status_code, error_code, request_id)
+        except (json.JSONDecodeError, KeyError):
+            raise SDKError(
+                "HTTP " + str(response.status_code) + ": " + str(response.text)[:200],
+                response.status_code,
+                "http_error",
+            )
+
+    def close(self):
+        self._client.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+
+def create_transport(
+    base_url: str,
+{{#each securitySchemes}}
+    {{configKey}}: Optional[str] = None,
+{{/each}}
+    timeout_ms: int = 15000,
+    retries: int = 3,
+    default_headers: Optional[Dict[str, str]] = None,
+    on_request: Optional[Callable] = None,
+    on_response: Optional[Callable] = None,
+    on_error: Optional[Callable] = None,
+) -> SDKTransport:
+    return SDKTransport(
+        base_url=base_url,
+{{#each securitySchemes}}
+        {{configKey}}={{configKey}},
+{{/each}}
+        timeout_ms=timeout_ms,
+        retries=retries,
+        default_headers=default_headers,
+        on_request=on_request,
+        on_response=on_response,
+        on_error=on_error,
+    )

@@ -1,0 +1,57 @@
+package {{packageName}}
+
+import kotlinx.coroutines.*
+
+/**
+ * Configuration for the {{title}} API client.
+ */
+data class ClientConfig(
+    val baseUrl: String = "{{baseUrl}}",
+{{#each securitySchemes}}
+{{#if (eq type "apiKey")}}
+    /** API key for the `{{name}}` security scheme. */
+    val {{configKey}}: String? = null,
+{{/if}}
+{{#if (and (eq type "http") (eq scheme "bearer"))}}
+    /** Bearer token for the `{{name}}` security scheme. */
+    val {{configKey}}: String? = null,
+{{/if}}
+{{#if (eq type "oauth2")}}
+    /** OAuth2 access token for the `{{name}}` security scheme. */
+    val {{configKey}}: String? = null,
+{{/if}}
+{{#if (eq type "openIdConnect")}}
+    /** OpenID Connect access token for the `{{name}}` security scheme. */
+    val {{configKey}}: String? = null,
+{{/if}}
+{{/each}}
+    /** Request timeout in milliseconds. */
+    val timeoutMs: Long = 15000,
+    /** Maximum number of retry attempts. */
+    val maxRetries: Int = 3,
+)
+
+/**
+ * Primary API client for {{title}}.
+ *
+ * Provides access to all domain-specific API groups.
+ */
+class {{clientName}}Client(
+    config: ClientConfig = ClientConfig()
+) {
+    private val transport: Transport = Transport(
+        TransportConfig(
+            baseUrl = config.baseUrl,
+{{#each securitySchemes}}
+            {{configKey}} = config.{{configKey}},
+{{/each}}
+            timeoutMs = config.timeoutMs,
+            maxRetries = config.maxRetries,
+        )
+    )
+
+{{#each groups}}
+    /** {{#if description}}{{description}}{{else}}{{interfaceName}} operations.{{/if}} */
+    val {{name}}: {{interfaceName}} = {{interfaceName}}(transport)
+{{/each}}
+}

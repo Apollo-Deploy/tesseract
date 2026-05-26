@@ -1,0 +1,11 @@
+"""API resource modules for {{moduleName}}."""
+
+{{#each groups}}
+from .{{fileName}} import {{interfaceName}}
+{{/each}}
+
+__all__ = [
+{{#each groups}}
+    "{{interfaceName}}",
+{{/each}}
+]

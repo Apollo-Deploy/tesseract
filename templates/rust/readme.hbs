@@ -1,0 +1,77 @@
+# {{title}}
+
+{{#if description}}{{description}}{{/if}}
+
+{{#unless description}}An auto-generated Rust SDK for the {{title}} API.{{/unless}}
+
+## Installation
+
+Add this to your `Cargo.toml`:
+
+```toml
+[dependencies]
+{{crateName}} = "{{#if packageVersion}}{{packageVersion}}{{else}}0.1.0{{/if}}"
+```
+
+## Quick Start
+
+```rust
+use {{crateName}}::Client;
+use {{crateName}}::ClientConfig;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut config = ClientConfig::default();
+{{#each securitySchemes}}
+{{#if (eq type "apiKey")}}
+    config.{{snakeCase configKey}} = Some("your-api-key".to_string());
+{{/if}}
+{{#if (and (eq type "http") (eq scheme "bearer"))}}
+    config.{{snakeCase configKey}} = Some("your-bearer-token".to_string());
+{{/if}}
+{{/each}}
+
+    let client = Client::new(config);
+
+    // Use domain clients
+{{#each groups}}
+{{#if @first}}
+    // let result = client.{{snakeCase name}}.some_operation().await?;
+{{/if}}
+{{/each}}
+
+    Ok(())
+}
+```
+
+## API Reference
+
+{{#each groups}}
+### {{interfaceName}}
+
+{{#if description}}
+{{description}}
+{{/if}}
+
+| Method | HTTP | Description |
+|--------|------|-------------|
+{{#each operations}}
+| `{{snakeCase name}}()` | `{{httpMethod}}` | {{#if summary}}{{summary}}{{else}}—{{/if}} |
+{{/each}}
+
+{{/each}}
+
+## Error Handling
+
+All API methods return `Result<T, SdkError>`. The `SdkError` enum has these variants:
+
+| Variant | Description |
+|---------|-------------|
+| `ApiError` | Server returned an error (4xx/5xx) |
+| `NetworkError` | Request failed due to connectivity issues |
+| `DeserializationError` | Response body could not be parsed |
+| `ValidationError` | Invalid request parameters |
+
+## License
+
+MIT

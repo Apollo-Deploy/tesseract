@@ -1,0 +1,158 @@
+package {{pkgName}}
+
+import (
+	"context"
+	"time"
+)
+
+// ── Client Configuration ──────────────────────────────────────────────────
+
+// ClientConfig holds all configuration for the API client.
+type ClientConfig struct {
+	BaseURL        string
+	Timeout        time.Duration
+	MaxRetries     int
+	DefaultHeaders map[string]string
+}
+
+// ClientOption is a functional option for configuring the client.
+type ClientOption func(*ClientConfig)
+
+// WithBaseURL sets the base URL for all API requests.
+func WithBaseURL(url string) ClientOption {
+	return func(c *ClientConfig) { c.BaseURL = url }
+}
+
+// WithTimeout sets the request timeout.
+func WithTimeout(d time.Duration) ClientOption {
+	return func(c *ClientConfig) { c.Timeout = d }
+}
+
+// WithMaxRetries sets the maximum number of retry attempts.
+func WithMaxRetries(n int) ClientOption {
+	return func(c *ClientConfig) { c.MaxRetries = n }
+}
+
+// WithDefaultHeader adds a default header sent with every request.
+func WithDefaultHeader(key, value string) ClientOption {
+	return func(c *ClientConfig) {
+		if c.DefaultHeaders == nil {
+			c.DefaultHeaders = make(map[string]string)
+		}
+		c.DefaultHeaders[key] = value
+	}
+}
+
+// DefaultConfig returns a ClientConfig populated with sensible defaults.
+func DefaultConfig() ClientConfig {
+	return ClientConfig{
+		BaseURL:    "{{baseUrl}}",
+		Timeout:    15 * time.Second,
+		MaxRetries: 3,
+	}
+}
+
+// ── Client ────────────────────────────────────────────────────────────────
+
+// Client is the primary API client for {{title}}.
+// It is safe for concurrent use by multiple goroutines.
+type Client struct {
+	config    ClientConfig
+	transport *Transport
+{{#each groups}}
+	{{pascalCase name}} *{{interfaceName}}
+{{/each}}
+}
+
+// NewClient creates a new {{title}} API client with the given options.
+//
+// Example:
+//
+//	client := petshop.NewClient(
+//	    petshop.WithBaseURL("https://api.example.com"),
+//	    petshop.WithTimeout(30*time.Second),
+//	)
+//	pets, err := client.Pets.List(ctx, nil)
+func NewClient(opts ...ClientOption) *Client {
+	cfg := DefaultConfig()
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
+	t := NewTransport(TransportConfig{
+		BaseURL:    cfg.BaseURL,
+		Timeout:    cfg.Timeout,
+		MaxRetries: cfg.MaxRetries,
+		Headers:    cfg.DefaultHeaders,
+	})
+
+	return &Client{
+		config:    cfg,
+		transport: t,
+{{#each groups}}
+		{{pascalCase name}}: &{{interfaceName}}{transport: t},
+{{/each}}
+	}
+}
+
+// Transport returns the underlying HTTP transport for advanced use cases.
+func (c *Client) Transport() *Transport {
+	return c.transport
+}
+
+// ── Request / Response types ──────────────────────────────────────────────
+
+// RequestOptions holds per-request overrides.
+type RequestOptions struct {
+	// Timeout overrides the client-level timeout for this request.
+	Timeout time.Duration
+	// Headers are additional headers merged into the request.
+	Headers map[string]string
+}
+
+// ListParams is embedded by list operation parameter types to provide
+// common pagination and filtering fields.
+type ListParams struct {
+	Page  *int    `json:"page,omitempty"`
+	Limit *int    `json:"limit,omitempty"`
+}
+
+// Int returns a pointer to the given int value. Useful for optional
+// parameters in request structs.
+func Int(v int) *int { return &v }
+
+// String returns a pointer to the given string value.
+func String(v string) *string { return &v }
+
+// Bool returns a pointer to the given bool value.
+func Bool(v bool) *bool { return &v }
+
+{{#if hasSSE}}
+// ── SSE Types ─────────────────────────────────────────────────────────────
+
+// SSEEvent represents a parsed Server-Sent Event.
+type SSEEvent struct {
+	Event string
+	Data  string
+	ID    string
+	Retry int
+}
+
+// SSEOption configures an SSE stream subscription.
+type SSEOption func(*sseConfig)
+
+type sseConfig struct {
+	signal    context.Context
+	eventTypes []string
+}
+
+// WithSSESignal sets a context for cancellation of the SSE stream.
+func WithSSESignal(ctx context.Context) SSEOption {
+	return func(c *sseConfig) { c.signal = ctx }
+}
+
+// WithSSEEventTypes filters the stream to specific event types.
+func WithSSEEventTypes(types ...string) SSEOption {
+	return func(c *sseConfig) { c.eventTypes = types }
+}
+{{/if}}

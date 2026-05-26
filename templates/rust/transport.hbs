@@ -1,0 +1,287 @@
+use crate::error::SdkError;
+use reqwest::{Client as ReqwestClient, Method, RequestBuilder, Response, StatusCode};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
+use std::sync::Arc;
+use std::time::Duration;
+use url::Url;
+
+/// Internal transport configuration.
+#[derive(Debug, Clone)]
+pub struct TransportConfig {
+    pub base_url: String,
+{{#each securitySchemes}}
+    pub {{snakeCase configKey}}: Option<String>,
+{{/each}}
+    pub timeout: Duration,
+    pub max_retries: u32,
+}
+
+/// HTTP transport layer for the SDK.
+///
+/// Handles request building, authentication, retries, and error mapping.
+/// Cloning a `Transport` produces a shallow clone that shares the underlying
+/// reqwest client.
+#[derive(Clone)]
+pub struct Transport {
+    client: ReqwestClient,
+    config: Arc<TransportConfig>,
+}
+
+impl Transport {
+    /// Create a new transport with the given configuration.
+    pub fn new(config: TransportConfig) -> Self {
+        let client = ReqwestClient::builder()
+            .timeout(config.timeout)
+            .build()
+            .expect("failed to build reqwest client");
+
+        Self {
+            client,
+            config: Arc::new(config),
+        }
+    }
+
+    /// Execute a request, deserializing the response body as JSON.
+    pub async fn execute<T: DeserializeOwned>(
+        &self,
+        method: Method,
+        path: &str,
+        query: Option<&[(String, String)]>,
+        body: Option<&(impl Serialize + ?Sized)>,
+        headers: Option<&[(String, String)]>,
+    ) -> Result<T, SdkError> {
+        let url = self.build_url(path, query)?;
+
+        let mut req = self.client.request(method, url);
+
+        req = self.apply_auth(req);
+        req = self.apply_headers(req, headers);
+
+        if let Some(b) = body {
+            req = req.json(b);
+        }
+
+        let response = self.execute_with_retry(req).await?;
+
+        self.handle_response(response).await
+    }
+
+    /// Execute a request that returns the raw response text.
+    pub async fn execute_raw(
+        &self,
+        method: Method,
+        path: &str,
+        query: Option<&[(String, String)]>,
+        body: Option<&(impl Serialize + ?Sized)>,
+        headers: Option<&[(String, String)]>,
+    ) -> Result<String, SdkError> {
+        let url = self.build_url(path, query)?;
+
+        let mut req = self.client.request(method, url);
+
+        req = self.apply_auth(req);
+        req = self.apply_headers(req, headers);
+
+        if let Some(b) = body {
+            req = req.json(b);
+        }
+
+        let response = self.execute_with_retry(req).await?;
+
+        let status = response.status();
+        let text = response.text().await.map_err(|e| {
+            SdkError::DeserializationError(format!("failed to read response body: {}", e))
+        })?;
+
+        if status.is_success() {
+            Ok(text)
+        } else {
+            Err(self.build_api_error(status, &text))
+        }
+    }
+
+    // ── private helpers ─────────────────────────────────────────────────────
+
+    fn build_url(
+        &self,
+        path: &str,
+        query: Option<&[(String, String)]>,
+    ) -> Result<Url, SdkError> {
+        let base = Url::parse(&self.config.base_url).map_err(|e| {
+            SdkError::ValidationError(format!("invalid base URL: {}", e))
+        })?;
+
+        let joined = base.join(path).map_err(|e| {
+            SdkError::ValidationError(format!("invalid path '{}': {}", path, e))
+        })?;
+
+        if let Some(params) = query {
+            let mut url = joined;
+            {
+                let mut qp = url.query_pairs_mut();
+                for (k, v) in params {
+                    qp.append_pair(k, v);
+                }
+            }
+            Ok(url)
+        } else {
+            Ok(joined)
+        }
+    }
+
+    fn apply_auth(&self, mut req: RequestBuilder) -> RequestBuilder {
+{{#each securitySchemes}}
+{{#if (eq type "apiKey")}}
+{{#if (eq in "header")}}
+        if let Some(ref key) = self.config.{{snakeCase configKey}} {
+            req = req.header("{{paramName}}", key);
+        }
+{{/if}}
+{{#if (eq in "query")}}
+        // API key via query parameter handled during URL construction
+{{/if}}
+{{/if}}
+{{#if (and (eq type "http") (eq scheme "bearer"))}}
+        if let Some(ref token) = self.config.{{snakeCase configKey}} {
+            req = req.header("Authorization", format!("Bearer {}", token));
+        }
+{{/if}}
+{{#if (eq type "oauth2")}}
+        if let Some(ref token) = self.config.{{snakeCase configKey}} {
+            req = req.header("Authorization", format!("Bearer {}", token));
+        }
+{{/if}}
+{{#if (eq type "openIdConnect")}}
+        if let Some(ref token) = self.config.{{snakeCase configKey}} {
+            req = req.header("Authorization", format!("Bearer {}", token));
+        }
+{{/if}}
+{{/each}}
+        req
+    }
+
+    fn apply_headers(
+        &self,
+        mut req: RequestBuilder,
+        headers: Option<&[(String, String)]>,
+    ) -> RequestBuilder {
+        if let Some(hdrs) = headers {
+            for (key, value) in hdrs {
+                req = req.header(key.as_str(), value.as_str());
+            }
+        }
+        req
+    }
+
+    async fn execute_with_retry(
+        &self,
+        req: RequestBuilder,
+    ) -> Result<Response, SdkError> {
+        let max_retries = self.config.max_retries;
+        let mut attempt = 0u32;
+
+        loop {
+            let request = req
+                .try_clone()
+                .ok_or_else(|| SdkError::NetworkError("failed to clone request for retry".to_string()))?;
+
+            match request.send().await {
+                Ok(response) => {
+                    let status = response.status();
+
+                    // Retry on server errors (5xx) and 429 Too Many Requests
+                    if status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS {
+                        if attempt < max_retries {
+                            attempt += 1;
+                            let backoff = Duration::from_millis(
+                                200u64 * 2u64.pow(attempt),
+                            );
+                            tokio::time::sleep(backoff).await;
+                            continue;
+                        }
+                    }
+                    return Ok(response);
+                }
+                Err(e) => {
+                    if attempt < max_retries && e.is_connect() || e.is_timeout() {
+                        attempt += 1;
+                        let backoff = Duration::from_millis(
+                            200u64 * 2u64.pow(attempt),
+                        );
+                        tokio::time::sleep(backoff).await;
+                        continue;
+                    }
+                    return Err(SdkError::NetworkError(e.to_string()));
+                }
+            }
+        }
+    }
+
+    async fn handle_response<T: DeserializeOwned>(
+        &self,
+        response: Response,
+    ) -> Result<T, SdkError> {
+        let status = response.status();
+        let text = response.text().await.map_err(|e| {
+            SdkError::DeserializationError(format!("failed to read response body: {}", e))
+        })?;
+
+        if status.is_success() {
+            serde_json::from_str(&text).map_err(|e| {
+                SdkError::DeserializationError(format!(
+                    "failed to deserialize response (status {}): {}",
+                    status, e
+                ))
+            })
+        } else {
+            Err(self.build_api_error(status, &text))
+        }
+    }
+
+    fn build_api_error(&self, status: StatusCode, body: &str) -> SdkError {
+        // Try to extract structured error info from the JSON body
+        let code = serde_json::from_str::<serde_json::Value>(body)
+            .ok()
+            .and_then(|v| {
+                v.get("code")
+                    .or_else(|| v.get("error"))
+                    .and_then(|c| c.as_str().map(String::from))
+                    .or_else(|| {
+                        v.get("error")
+                            .and_then(|e| e.get("code"))
+                            .and_then(|c| c.as_str().map(String::from))
+                    })
+            });
+
+        let message = serde_json::from_str::<serde_json::Value>(body)
+            .ok()
+            .and_then(|v| {
+                v.get("message")
+                    .or_else(|| v.get("error"))
+                    .and_then(|m| {
+                        if m.is_string() {
+                            m.as_str().map(String::from)
+                        } else {
+                            m.get("message").and_then(|s| s.as_str().map(String::from))
+                        }
+                    })
+            })
+            .unwrap_or_else(|| body.to_string());
+
+        SdkError::ApiError {
+            status: status.as_u16(),
+            code,
+            message,
+            body: body.to_string(),
+        }
+    }
+}
+
+impl std::fmt::Debug for Transport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Transport")
+            .field("config", &self.config)
+            .finish()
+    }
+}

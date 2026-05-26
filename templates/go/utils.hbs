@@ -1,0 +1,45 @@
+package {{pkgName}}
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/url"
+	"strings"
+)
+
+// buildPath substitutes path parameters into a URL template.
+// replacements is pairs of (placeholder, value).
+func buildPath(template string, replacements ...string) string {
+	for i := 0; i < len(replacements); i += 2 {
+		placeholder := ":" + replacements[i]
+		value := url.PathEscape(replacements[i+1])
+		template = strings.Replace(template, placeholder, value, 1)
+	}
+	return template
+}
+
+// buildQuery converts a params struct into url.Values.
+func buildQuery(params interface{}) url.Values {
+	if params == nil {
+		return nil
+	}
+	data, err := json.Marshal(params)
+	if err != nil {
+		return nil
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil
+	}
+	q := url.Values{}
+	for k, v := range m {
+		if v == nil {
+			continue
+		}
+		q.Set(k, fmt.Sprintf("%v", v))
+	}
+	if len(q) == 0 {
+		return nil
+	}
+	return q
+}

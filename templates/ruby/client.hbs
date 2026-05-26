@@ -1,0 +1,86 @@
+# frozen_string_literal: true
+
+require_relative "transport"
+{{#each groups}}
+require_relative "resources/{{fileName}}"
+{{/each}}
+
+module {{pascalCase meta.clientName}}
+  # Configuration for the {{meta.title}} SDK client.
+  class Config
+    # @return [String] the base URL for API requests
+    attr_accessor :base_url
+    # @return [Integer] request timeout in seconds
+    attr_accessor :timeout
+    # @return [Hash] retry configuration
+    attr_accessor :retries
+    # @return [Hash] default headers sent with every request
+    attr_accessor :default_headers
+    {{#each securitySchemes}}
+    # @return [String, nil] credential for {{name}} security scheme
+    attr_accessor :{{camelCase name}}
+    {{/each}}
+
+    # @param base_url [String] the base URL for API requests
+    # @param timeout [Integer] request timeout in seconds (default: 15)
+    # @param retries [Hash] retry configuration
+    # @param default_headers [Hash] headers sent with every request
+    {{#each securitySchemes}}
+    # @param {{camelCase name}} [String, nil] credential for {{name}}
+    {{/each}}
+    def initialize(
+      base_url: '{{meta.baseUrl}}',
+      timeout: 15,
+      retries: { attempts: 3, backoff: 0.4, jitter: true, max_backoff: 30.0 },
+      default_headers: {},
+      {{#each securitySchemes}}
+      {{camelCase name}}: nil,
+      {{/each}}
+      **_
+    )
+      @base_url = base_url
+      @timeout = timeout
+      @retries = retries
+      @default_headers = default_headers
+      {{#each securitySchemes}}
+      @{{camelCase name}} = {{camelCase name}}
+      {{/each}}
+    end
+  end
+
+  # Main client for the {{meta.title}} API.
+  #
+  # Provides access to all API domains as instance methods.
+  class Client
+    {{#each groups}}
+    # @return [{{pascalCase ../meta.clientName}}::{{pascalCase name}}]
+    attr_reader :{{name}}
+    {{/each}}
+
+    # @return [{{pascalCase meta.clientName}}::Config] the client configuration
+    attr_reader :config
+
+    # @return [{{pascalCase meta.clientName}}::Transport] the underlying HTTP transport
+    attr_reader :transport
+
+    # Create a new API client.
+    #
+    # @param config [{{pascalCase meta.clientName}}::Config, Hash, nil]
+    #   Either a Config instance or keyword arguments matching Config#initialize.
+    def initialize(config = nil)
+      @config = if config.is_a?(Config)
+                  config
+                elsif config.is_a?(Hash)
+                  Config.new(**config)
+                else
+                  Config.new
+                end
+
+      @transport = Transport.new(@config)
+
+      {{#each groups}}
+      @{{name}} = {{pascalCase ../meta.clientName}}::{{pascalCase name}}.new(@transport)
+      {{/each}}
+    end
+  end
+end

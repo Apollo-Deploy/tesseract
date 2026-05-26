@@ -1,0 +1,95 @@
+namespace {{namespace}};
+
+using System;
+using System.Collections.Generic;
+using {{namespace}}.Api;
+
+/// <summary>
+/// Configuration for the {{clientName}} API client.
+/// </summary>
+public class {{clientName}}ClientConfig
+{
+    /// <summary>
+    /// Base URL for all API requests.
+    /// </summary>
+    public string BaseUrl { get; set; } = "{{baseUrl}}";
+{{#each securitySchemes}}
+{{#if (eq type "apiKey")}}
+    /// <summary>
+    /// API key for the {{name}} security scheme.
+    /// </summary>
+    public string? {{pascalCase configKey}} { get; set; }
+{{/if}}
+{{#if (and (eq type "http") (eq scheme "bearer"))}}
+    /// <summary>
+    /// Bearer token for the {{name}} security scheme.
+    /// </summary>
+    public string? {{pascalCase configKey}} { get; set; }
+{{/if}}
+{{#if (eq type "oauth2")}}
+    /// <summary>
+    /// OAuth2 access token for the {{name}} security scheme.
+    /// </summary>
+    public string? {{pascalCase configKey}} { get; set; }
+{{/if}}
+{{#if (eq type "openIdConnect")}}
+    /// <summary>
+    /// OpenID Connect token for the {{name}} security scheme.
+    /// </summary>
+    public string? {{pascalCase configKey}} { get; set; }
+{{/if}}
+{{/each}}
+    /// <summary>
+    /// Request timeout in milliseconds.
+    /// </summary>
+    public int TimeoutMs { get; set; } = 15000;
+
+    /// <summary>
+    /// Maximum number of retry attempts for transient failures.
+    /// </summary>
+    public int MaxRetries { get; set; } = 3;
+
+    /// <summary>
+    /// Default headers sent with every request.
+    /// </summary>
+    public Dictionary<string, string>? DefaultHeaders { get; set; }
+}
+
+/// <summary>
+/// Primary API client for {{title}}.
+/// </summary>
+public class {{clientName}}Client
+{
+    private readonly Transport _transport;
+
+{{#each groups}}
+    /// <summary>
+    /// {{#if description}}{{description}}{{else}}{{name}} operations{{/if}}
+    /// </summary>
+    public {{interfaceName}} {{pascalCase name}} { get; }
+{{/each}}
+
+    /// <summary>
+    /// Creates a new {{clientName}} API client.
+    /// </summary>
+    /// <param name="config">Client configuration. If null, defaults are used.</param>
+    public {{clientName}}Client({{clientName}}ClientConfig? config = null)
+    {
+        config ??= new {{clientName}}ClientConfig();
+
+        _transport = new Transport(new TransportConfig
+        {
+            BaseUrl = config.BaseUrl,
+{{#each securitySchemes}}
+            {{pascalCase configKey}} = config.{{pascalCase configKey}},
+{{/each}}
+            TimeoutMs = config.TimeoutMs,
+            MaxRetries = config.MaxRetries,
+            DefaultHeaders = config.DefaultHeaders,
+        });
+
+{{#each groups}}
+        {{pascalCase name}} = new {{interfaceName}}(_transport);
+{{/each}}
+    }
+}

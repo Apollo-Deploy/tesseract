@@ -1,0 +1,73 @@
+# {{title}} Go SDK
+
+[![Go Reference](https://pkg.go.dev/badge/{{packageName}}.svg)](https://pkg.go.dev/{{packageName}})
+
+The official Go SDK for {{#if description}}{{description}}{{else}}the {{title}} API{{/if}}.
+
+## Installation
+
+```bash
+go get {{packageName}}
+```
+
+## Quick Start
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+
+    "{{packageName}}"
+)
+
+func main() {
+    client := {{pkgName}}.NewClient({{pkgName}}.DefaultClientConfig(){{#each securitySchemes}}{{#if (eq type "apiKey")}}
+        {{pascalCase configKey}}: "your-api-key",{{/if}}{{#if (and (eq type "http") (eq scheme "bearer"))}}
+        {{pascalCase configKey}}: "your-bearer-token",{{/if}}
+{{/each}}
+    )
+
+    ctx := context.Background()
+{{#each groups}}
+{{#with operations.[0]}}
+    // {{../interfaceName}}.{{name}} example
+    result, err := client.{{pascalCase ../name}}.{{pascalCase name}}(ctx{{#each ../pathParams}}, "{{this}}"{{/each}}{{#if requestBody}}, {{requestBody.type}}{}{{/if}})
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("%+v\n", result)
+{{/with}}
+{{/each}}
+}
+```
+
+## API Reference
+
+| Domain | Description |
+|--------|-------------|
+{{#each groups}}
+| `{{interfaceName}}` | {{#if description}}{{description}}{{else}}{{name}} operations{{/if}} |
+{{/each}}
+
+## Error Handling
+
+All methods return an `error` as the second return value. Use `errors.As` to inspect SDK-specific errors:
+
+```go
+var sdkErr *SDKError
+if errors.As(err, &sdkErr) {
+    fmt.Printf("Status: %d, Code: %s, RequestID: %s\n",
+        sdkErr.Status, sdkErr.Code, sdkErr.RequestID)
+}
+```
+
+## Requirements
+
+- Go 1.21 or later
+
+## License
+
+{{#if license}}{{license}}{{else}}MIT{{/if}}

@@ -1,0 +1,177 @@
+# frozen_string_literal: true
+
+require "faraday"
+require "json"
+require_relative "errors"
+
+module {{pascalCase meta.clientName}}
+  # HTTP transport layer built on Faraday.
+  class Transport
+    attr_reader :config
+    attr_reader :connection
+
+    def initialize(config)
+      @config = config
+      @connection = Faraday.new(url: config.base_url) do |f|
+        f.request :json
+        f.response :raise_error
+        f.options.timeout = config.timeout
+        f.options.open_timeout = [config.timeout / 3, 2].max
+        config.default_headers.each do |key, value|
+          f.headers[key] = value
+        end
+        f.adapter Faraday.default_adapter
+      end
+    end
+
+    def request(method:, path:, path_params: {}, query: nil, body: nil, headers: {}, content_type: nil)
+      url = build_url(path, path_params)
+      attempts = 0
+      max_attempts = [(@config.retries[:attempts] || 3), 1].max
+      backoff = @config.retries[:backoff] || 0.4
+      jitter = @config.retries.fetch(:jitter, true)
+      max_backoff = @config.retries[:max_backoff] || 30.0
+      begin
+        attempts += 1
+        response = @connection.run_request(
+          method.to_sym, url, body, build_headers(headers, content_type)
+        ) do |req|
+          req.params.merge!(query) if query && !query.empty?
+        end
+        parse_response(response)
+      rescue Faraday::Error => e
+        raise map_error(e, method: method, path: path) unless should_retry?(e, attempts, max_attempts)
+        sleep(retry_delay(backoff, attempts, jitter, max_backoff))
+        retry
+      end
+    end
+
+    def get(path:, path_params: {}, query: nil, headers: {})
+      request(method: :get, path: path, path_params: path_params, query: query, headers: headers)
+    end
+
+    def post(path:, body: nil, path_params: {}, query: nil, headers: {}, content_type: nil)
+      request(method: :post, path: path, body: body, path_params: path_params,
+              query: query, headers: headers, content_type: content_type)
+    end
+
+    def put(path:, body: nil, path_params: {}, query: nil, headers: {}, content_type: nil)
+      request(method: :put, path: path, body: body, path_params: path_params,
+              query: query, headers: headers, content_type: content_type)
+    end
+
+    def patch(path:, body: nil, path_params: {}, query: nil, headers: {}, content_type: nil)
+      request(method: :patch, path: path, body: body, path_params: path_params,
+              query: query, headers: headers, content_type: content_type)
+    end
+
+    def delete(path:, path_params: {}, query: nil, headers: {})
+      request(method: :delete, path: path, path_params: path_params, query: query, headers: headers)
+    end
+
+    private
+
+    def build_url(path, path_params)
+      return path if path_params.empty?
+      path.gsub(/\{(\w+)\}/) do |_match|
+        key = ::Regexp.last_match(1)
+        value = path_params[key.to_sym] || path_params[key]
+        value.nil? ? _match : value.to_s
+      end
+    end
+
+    def build_headers(extra_headers = {}, content_type = nil)
+      headers = {}
+      if content_type
+        headers["Content-Type"] = content_type
+      end
+{{#each securitySchemes}}
+{{#if (eq type "apiKey")}}
+{{#if (eq in "header")}}
+      headers["{{paramName}}"] = @config.{{camelCase name}} if @config.{{camelCase name}}
+{{/if}}
+{{/if}}
+{{#if (and (eq type "http") (eq scheme "bearer"))}}
+      headers["Authorization"] = "Bearer " + (@config.{{camelCase name}} || "") if @config.{{camelCase name}}
+{{/if}}
+{{#if (eq type "oauth2")}}
+      headers["Authorization"] = "Bearer " + (@config.{{camelCase name}} || "") if @config.{{camelCase name}}
+{{/if}}
+{{#if (eq type "openIdConnect")}}
+      headers["Authorization"] = "Bearer " + (@config.{{camelCase name}} || "") if @config.{{camelCase name}}
+{{/if}}
+{{/each}}
+      headers.merge!(extra_headers)
+      headers
+    end
+
+    def parse_response(response)
+      body = response.body
+      return nil if body.nil? || (body.is_a?(String) && body.strip.empty?)
+      if body.is_a?(String)
+        begin
+          JSON.parse(body)
+        rescue JSON::ParserError
+          body
+        end
+      else
+        body
+      end
+    end
+
+    def map_error(error, method:, path:)
+      case error
+      when Faraday::TimeoutError
+        SDKError.new("Request timed out", 0, "network_error", method: method, path: path)
+      when Faraday::ConnectionFailed
+        SDKError.new("Connection failed: " + error.message, 0, "network_error", method: method, path: path)
+      when Faraday::ResourceNotFound
+        SDKError.new("Not found: " + error.message, 404, "not_found", method: method, path: path)
+      when Faraday::ClientError
+        status = error.response&.[](:status) || 400
+        begin
+          body = error.response&.[](:body)
+          envelope = body.is_a?(String) ? JSON.parse(body) : body
+          if envelope.is_a?(Hash)
+            SDKError.new(
+              envelope["message"] || envelope["error"] || "Request failed",
+              status,
+              envelope["error"] || envelope["code"] || "unknown_error",
+              request_id: envelope["request_id"],
+              method: method, path: path
+            )
+          else
+            SDKError.new("Request failed with status " + status.to_s, status, "unknown_error", method: method, path: path)
+          end
+        rescue
+          SDKError.new("Request failed with status " + status.to_s, status, "unknown_error", method: method, path: path)
+        end
+      when Faraday::ServerError
+        status = error.response&.[](:status) || 500
+        SDKError.new("Server error: " + error.message, status, "internal_server_error", method: method, path: path)
+      else
+        SDKError.new(error.message, 0, "unknown_error", method: method, path: path)
+      end
+    end
+
+    def should_retry?(_error, attempts, max_attempts)
+      return false if attempts >= max_attempts
+      case _error
+      when Faraday::TimeoutError, Faraday::ConnectionFailed, Faraday::ServerError
+        true
+      when Faraday::ClientError
+        status = _error.response&.[](:status)
+        status == 429
+      else
+        false
+      end
+    end
+
+    def retry_delay(base, attempt, jitter, max_backoff)
+      delay = base * (2**(attempt - 1))
+      delay = max_backoff if delay > max_backoff
+      delay *= (0.5 + rand * 0.5) if jitter
+      delay
+    end
+  end
+end

@@ -1,0 +1,74 @@
+use thiserror::Error;
+
+/// Primary error type for the {{crateName}} SDK.
+///
+/// All API methods return `Result<T, SdkError>`.
+#[derive(Error, Debug)]
+pub enum SdkError {
+    /// The API returned an error response (4xx/5xx).
+    #[error("API error (status {status}): {message}")]
+    ApiError {
+        /// HTTP status code.
+        status: u16,
+        /// Machine-readable error code (if available).
+        code: Option<String>,
+        /// Human-readable error message.
+        message: String,
+        /// Raw response body for debugging.
+        body: String,
+    },
+
+    /// A network-level error occurred (DNS, TLS, connection refused, timeout).
+    #[error("network error: {0}")]
+    NetworkError(String),
+
+    /// Failed to deserialize the response body.
+    #[error("deserialization error: {0}")]
+    DeserializationError(String),
+
+    /// The request parameters failed client-side validation.
+    #[error("validation error: {0}")]
+    ValidationError(String),
+}
+
+impl SdkError {
+    /// Returns the HTTP status code, if this is an `ApiError`.
+    pub fn status(&self) -> Option<u16> {
+        match self {
+            Self::ApiError { status, .. } => Some(*status),
+            _ => None,
+        }
+    }
+
+    /// Returns `true` if this error was caused by the server (5xx).
+    pub fn is_server_error(&self) -> bool {
+        matches!(self, Self::ApiError { status, .. } if *status >= 500)
+    }
+
+    /// Returns `true` if this error was caused by the client (4xx).
+    pub fn is_client_error(&self) -> bool {
+        matches!(self, Self::ApiError { status, .. } if *status >= 400 && *status < 500)
+    }
+
+    /// Returns `true` if this is a network error (should be retried safely).
+    pub fn is_retryable(&self) -> bool {
+        matches!(
+            self,
+            Self::NetworkError(_)
+                | Self::ApiError {
+                    status: 429 | 502 | 503 | 504,
+                    ..
+                }
+        )
+    }
+
+    /// Returns the error message as a string.
+    pub fn message(&self) -> &str {
+        match self {
+            Self::ApiError { message, .. } => message.as_str(),
+            Self::NetworkError(msg) => msg.as_str(),
+            Self::DeserializationError(msg) => msg.as_str(),
+            Self::ValidationError(msg) => msg.as_str(),
+        }
+    }
+}

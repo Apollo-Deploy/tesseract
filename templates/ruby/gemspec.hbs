@@ -1,0 +1,30 @@
+# frozen_string_literal: true
+
+require_relative "lib/{{snakeModule}}/version"
+
+Gem::Specification.new do |spec|
+  spec.name          = "{{gemName}}"
+  spec.version       = {{pascalCase snakeModule}}::VERSION
+  spec.authors       = ["API SDK Generator"]
+  spec.email         = ["sdk@example.com"]
+
+  spec.summary       = "{{#if meta.description}}{{meta.description}}{{else}}Ruby SDK for {{meta.title}}{{/if}}"
+  spec.description   = "{{#if meta.description}}{{meta.description}}{{else}}A Ruby client library for the {{meta.title}} API.{{/if}}"
+  spec.homepage      = "https://github.com/example/{{gemName}}"
+  spec.license       = "MIT"
+  spec.required_ruby_version = Gem::Requirement.new(">= 2.7.0")
+
+  spec.metadata["homepage_uri"]    = spec.homepage
+  spec.metadata["source_code_uri"] = "https://github.com/example/{{gemName}}"
+  spec.metadata["changelog_uri"]   = "https://github.com/example/{{gemName}}/blob/main/CHANGELOG.md"
+
+  spec.files = Dir.glob("lib/**/*.rb") + %w[README.md LICENSE Gemfile]
+  spec.require_paths = ["lib"]
+
+  spec.add_dependency "faraday", "~> 2.0"
+  spec.add_dependency "json"
+
+  spec.add_development_dependency "rake", "~> 13.0"
+  spec.add_development_dependency "rspec", "~> 3.0"
+  spec.add_development_dependency "webmock", "~> 3.0"
+end

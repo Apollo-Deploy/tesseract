@@ -1,0 +1,94 @@
+use crate::transport::Transport;
+use crate::error::SdkError;
+use reqwest::Method;
+{{#if imports.length}}
+use crate::types::{ {{join imports ", "}} };
+{{/if}}
+
+/// {{#if description}}{{description}}{{else}}{{interfaceName}} API operations.{{/if}}
+pub struct {{interfaceName}} {
+    transport: Transport,
+}
+
+impl {{interfaceName}} {
+    pub(crate) fn new(transport: Transport) -> Self {
+        Self { transport }
+    }
+
+{{#each operations}}
+    {{#if summary}}
+    /// {{summary}}{{#if description}}
+    ///
+    /// {{description}}{{/if}}
+    {{/if}}
+    {{#if deprecated}}
+    #[deprecated{{#if deprecationMessage}}(note = "{{deprecationMessage}}"){{/if}}]
+    {{/if}}
+    pub async fn {{snakeCase name}}(
+        &self,
+{{#each pathParams}}
+        {{snakeCase name}}: {{{rustParamType type}}},
+{{/each}}
+{{#if requestBody}}
+        body: &{{{requestBody.rustType}}},
+{{/if}}
+{{#if queryType}}
+        query: Option<&{{{rustQueryType queryType}}}>,
+{{/if}}
+    ) -> Result<{{#if isEventStream}}Vec<{{#if eventSchema}}{{{rustType eventSchema}}}{{else}}serde_json::Value{{/if}}>{{else}}{{{rustResponseType}}}{{/if}}, SdkError> {
+        let path = format!("{{path}}"{{#each pathParams}}, {{snakeCase name}} = {{#if (isRustCopyType type)}}{{snakeCase name}}{{else}}{{snakeCase name}}{{/if}}{{/each}});
+{{#if (hasQueryParams this)}}
+        let mut query_params: Vec<(String, String)> = Vec::new();
+        if let Some(q) = query {
+{{#each _queryParams}}
+            if let Some(ref v) = q.{{snakeCase name}} {
+                query_params.push(("{{originalName}}".to_string(), v.to_string()));
+            }
+{{/each}}
+        }
+        let query_slice: Option<&[(String, String)]> = if query_params.is_empty() { None } else { Some(&query_params) };
+{{else if queryType}}
+        // Query params from typed query object
+        let query_slice: Option<&[(String, String)]> = None; // TODO: serialize query type
+{{else}}
+        let query_slice: Option<&[(String, String)]> = None;
+{{/if}}
+
+{{#if (or (hasRequestBody this) (needsRequestHeaders this))}}
+        let mut headers: Vec<(String, String)> = Vec::new();
+{{#if (hasRequestBody this)}}
+{{#if (and (neq requestBody.contentType "application/json") (neq requestBody.contentType "multipart/form-data"))}}
+        headers.push(("Content-Type".to_string(), "{{requestBody.contentType}}".to_string()));
+{{/if}}
+{{/if}}
+{{#if (and headerParams.length headerType)}}
+        // Header params injected from header options
+{{/if}}
+{{#each headerParams}}
+        if let Some(ref h) = header_options.{{snakeCase name}} {
+            headers.push(("{{originalName}}".to_string(), h.to_string()));
+        }
+{{/each}}
+{{#if cookieParams}}
+        // Cookie params
+{{/if}}
+        let headers_slice: Option<&[(String, String)]> = if headers.is_empty() { None } else { Some(&headers) };
+{{else}}
+        let headers_slice: Option<&[(String, String)]> = None;
+{{/if}}
+
+        self.transport.execute::<{{#if isEventStream}}Vec<{{#if eventSchema}}{{{rustType eventSchema}}}{{else}}serde_json::Value{{/if}}>{{else}}{{{rustResponseType}}}{{/if}}>(
+            Method::{{httpMethod}},
+            &path,
+            query_slice,
+{{#if requestBody}}
+            Some(body),
+{{else}}
+            None::<&serde_json::Value>,
+{{/if}}
+            headers_slice,
+        ).await
+    }
+
+{{/each}}
+}

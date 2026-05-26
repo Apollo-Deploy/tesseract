@@ -1,0 +1,420 @@
+{
+  "$schema": "sdk-manifold/v1",
+  "info": {
+    "title": "PetShop API",
+    "version": "1.0.0",
+    "description": "A comprehensive REST API for managing a pet store — pets, orders, and inventory.",
+    "baseUrl": "https://api.petshop.example.com/v1"
+  },
+  "domains": [
+    {
+      "prefix": "/pets",
+      "domain": "pets",
+      "description": "Manage pets in the store",
+      "routes": [
+        {
+          "method": "GET",
+          "url": "/",
+          "schema": {
+            "summary": "List all pets",
+            "description": "Returns a paginated list of pets. Supports filtering by status and species.",
+            "operationId": "listPets",
+            "tags": ["pets"],
+            "query": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": ["available", "pending", "sold"]
+                },
+                "species": { "type": "string" },
+                "page": { "type": "integer" },
+                "limit": { "type": "integer" }
+              }
+            },
+            "response": {
+              "200": {
+                "type": "object",
+                "properties": {
+                  "data": { "type": "array", "items": { "$ref": "Pet" } },
+                  "page": { "$ref": "PageMeta" }
+                },
+                "required": ["data", "page"]
+              }
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "url": "/",
+          "schema": {
+            "summary": "Create a new pet",
+            "description": "Adds a new pet to the store.",
+            "operationId": "createPet",
+            "tags": ["pets"],
+            "body": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "species": { "type": "string" },
+                "breed": { "type": "string" },
+                "age": { "type": "integer" },
+                "price": { "type": "number" },
+                "status": {
+                  "type": "string",
+                  "enum": ["available", "pending", "sold"]
+                },
+                "tags": { "type": "array", "items": { "type": "string" } }
+              },
+              "required": ["name", "species", "price"]
+            },
+            "response": {
+              "201": { "$ref": "Pet" }
+            }
+          }
+        },
+        {
+          "method": "GET",
+          "url": "/:petId",
+          "schema": {
+            "summary": "Get pet by ID",
+            "description": "Returns a single pet by its unique identifier.",
+            "operationId": "getPet",
+            "tags": ["pets"],
+            "params": {
+              "type": "object",
+              "properties": {
+                "petId": { "type": "string" }
+              },
+              "required": ["petId"]
+            },
+            "response": {
+              "200": { "$ref": "Pet" }
+            }
+          }
+        },
+        {
+          "method": "PUT",
+          "url": "/:petId",
+          "schema": {
+            "summary": "Update a pet",
+            "description": "Updates an existing pet's information.",
+            "operationId": "updatePet",
+            "tags": ["pets"],
+            "params": {
+              "type": "object",
+              "properties": {
+                "petId": { "type": "string" }
+              },
+              "required": ["petId"]
+            },
+            "body": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "species": { "type": "string" },
+                "breed": { "type": "string" },
+                "age": { "type": "integer" },
+                "price": { "type": "number" },
+                "status": {
+                  "type": "string",
+                  "enum": ["available", "pending", "sold"]
+                },
+                "tags": { "type": "array", "items": { "type": "string" } }
+              }
+            },
+            "response": {
+              "200": { "$ref": "Pet" }
+            }
+          }
+        },
+        {
+          "method": "DELETE",
+          "url": "/:petId",
+          "schema": {
+            "summary": "Delete a pet",
+            "description": "Removes a pet from the store.",
+            "operationId": "deletePet",
+            "tags": ["pets"],
+            "params": {
+              "type": "object",
+              "properties": {
+                "petId": { "type": "string" }
+              },
+              "required": ["petId"]
+            },
+            "response": {
+              "200": {
+                "type": "object",
+                "properties": {
+                  "success": { "type": "boolean" },
+                  "message": { "type": "string" }
+                },
+                "required": ["success"]
+              }
+            }
+          }
+        },
+        {
+          "method": "GET",
+          "url": "/:petId/events",
+          "schema": {
+            "summary": "Stream pet events",
+            "description": "Opens an SSE stream of real-time events for a specific pet.",
+            "operationId": "streamPetEvents",
+            "tags": ["pets"],
+            "params": {
+              "type": "object",
+              "properties": {
+                "petId": { "type": "string" }
+              },
+              "required": ["petId"]
+            },
+            "response": {
+              "200": { "$ref": "PetEvent" }
+            }
+          },
+          "sse": true
+        }
+      ]
+    },
+    {
+      "prefix": "/orders",
+      "domain": "orders",
+      "description": "Manage pet orders",
+      "routes": [
+        {
+          "method": "GET",
+          "url": "/",
+          "schema": {
+            "summary": "List all orders",
+            "description": "Returns a paginated list of orders with optional status filter.",
+            "operationId": "listOrders",
+            "tags": ["orders"],
+            "query": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": ["placed", "approved", "delivered"]
+                },
+                "page": { "type": "integer" },
+                "limit": { "type": "integer" }
+              }
+            },
+            "response": {
+              "200": {
+                "type": "object",
+                "properties": {
+                  "data": { "type": "array", "items": { "$ref": "Order" } },
+                  "page": { "$ref": "PageMeta" }
+                },
+                "required": ["data", "page"]
+              }
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "url": "/",
+          "schema": {
+            "summary": "Place an order",
+            "description": "Creates a new order for a pet.",
+            "operationId": "placeOrder",
+            "tags": ["orders"],
+            "body": {
+              "type": "object",
+              "properties": {
+                "petId": { "type": "string" },
+                "quantity": { "type": "integer", "default": 1 },
+                "shipDate": { "type": "string", "format": "date-time" }
+              },
+              "required": ["petId"]
+            },
+            "response": {
+              "201": { "$ref": "Order" }
+            }
+          }
+        },
+        {
+          "method": "GET",
+          "url": "/:orderId",
+          "schema": {
+            "summary": "Get order by ID",
+            "description": "Returns a single order by its ID.",
+            "operationId": "getOrder",
+            "tags": ["orders"],
+            "params": {
+              "type": "object",
+              "properties": {
+                "orderId": { "type": "string" }
+              },
+              "required": ["orderId"]
+            },
+            "response": {
+              "200": { "$ref": "Order" }
+            }
+          }
+        },
+        {
+          "method": "DELETE",
+          "url": "/:orderId",
+          "schema": {
+            "summary": "Cancel an order",
+            "description": "Cancels a pending order.",
+            "operationId": "cancelOrder",
+            "tags": ["orders"],
+            "params": {
+              "type": "object",
+              "properties": {
+                "orderId": { "type": "string" }
+              },
+              "required": ["orderId"]
+            },
+            "response": {
+              "200": {
+                "type": "object",
+                "properties": {
+                  "success": { "type": "boolean" },
+                  "message": { "type": "string" }
+                },
+                "required": ["success"]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "prefix": "/inventory",
+      "domain": "inventory",
+      "description": "Store inventory management",
+      "routes": [
+        {
+          "method": "GET",
+          "url": "/",
+          "schema": {
+            "summary": "Get inventory summary",
+            "description": "Returns a summary of inventory counts by status.",
+            "operationId": "getInventory",
+            "tags": ["inventory"],
+            "response": {
+              "200": {
+                "type": "object",
+                "additionalProperties": { "type": "integer" }
+              }
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "url": "/restock",
+          "schema": {
+            "summary": "Restock inventory",
+            "description": "Adds stock for a specific species.",
+            "operationId": "restockInventory",
+            "tags": ["inventory"],
+            "body": {
+              "type": "object",
+              "properties": {
+                "species": { "type": "string" },
+                "count": { "type": "integer" },
+                "supplierId": { "type": "string" }
+              },
+              "required": ["species", "count"]
+            },
+            "response": {
+              "200": {
+                "type": "object",
+                "properties": {
+                  "success": { "type": "boolean" },
+                  "message": { "type": "string" },
+                  "newCount": { "type": "integer" }
+                },
+                "required": ["success", "newCount"]
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "definitions": {
+    "Pet": {
+      "type": "object",
+      "description": "A pet in the store",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "species": { "type": "string" },
+        "breed": { "type": "string", "nullable": true },
+        "age": { "type": "integer" },
+        "price": { "type": "number" },
+        "status": {
+          "type": "string",
+          "enum": ["available", "pending", "sold"]
+        },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "nullable": true
+        }
+      },
+      "required": ["id", "name", "species", "price", "status"]
+    },
+    "PetEvent": {
+      "type": "object",
+      "description": "A real-time event related to a pet",
+      "properties": {
+        "eventType": {
+          "type": "string",
+          "enum": [
+            "health_check",
+            "feeding",
+            "exercise",
+            "grooming",
+            "vet_visit"
+          ]
+        },
+        "petId": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "description": { "type": "string" },
+        "metadata": { "type": "object", "additionalProperties": true }
+      },
+      "required": ["eventType", "petId", "timestamp"]
+    },
+    "Order": {
+      "type": "object",
+      "description": "A pet order",
+      "properties": {
+        "id": { "type": "string" },
+        "petId": { "type": "string" },
+        "quantity": { "type": "integer" },
+        "shipDate": {
+          "type": "string",
+          "format": "date-time",
+          "nullable": true
+        },
+        "status": {
+          "type": "string",
+          "enum": ["placed", "approved", "delivered"]
+        },
+        "complete": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "petId", "status"]
+    },
+    "PageMeta": {
+      "type": "object",
+      "description": "Pagination metadata",
+      "properties": {
+        "size": { "type": "integer" },
+        "totalPages": { "type": "integer" },
+        "hasMore": { "type": "boolean" }
+      },
+      "required": ["size", "totalPages", "hasMore"]
+    }
+  }
+}

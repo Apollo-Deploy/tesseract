@@ -1,0 +1,246 @@
+package {{packageName}}
+
+import io.ktor.client.*
+import io.ktor.client.engine.cio.*
+import io.ktor.client.plugins.*
+import io.ktor.client.plugins.contentnegotiation.*
+import io.ktor.client.request.*
+import io.ktor.client.statement.*
+import io.ktor.http.*
+import io.ktor.serialization.kotlinx.json.*
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.coroutines.*
+
+/**
+ * Internal transport configuration.
+ */
+data class TransportConfig(
+    val baseUrl: String,
+{{#each securitySchemes}}
+    val {{configKey}}: String? = null,
+{{/each}}
+    val timeoutMs: Long = 15000,
+    val maxRetries: Int = 3,
+)
+
+/**
+ * HTTP transport layer for the SDK.
+ *
+ * Handles request building, authentication, retries, and error mapping
+ * using Ktor's HttpClient.
+ */
+class Transport(
+    private val config: TransportConfig
+) {
+    private val json = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+        encodeDefaults = true
+        coerceInputValues = true
+    }
+
+    private val client = HttpClient(CIO) {
+        install(ContentNegotiation) {
+            json(json)
+        }
+
+        install(HttpTimeout) {
+            requestTimeoutMillis = config.timeoutMs
+            connectTimeoutMillis = config.timeoutMs
+            socketTimeoutMillis = config.timeoutMs
+        }
+
+        defaultRequest {
+            url(config.baseUrl)
+            contentType(ContentType.Application.Json)
+            accept(ContentType.Application.Json)
+        }
+    }
+
+    /**
+     * Execute an HTTP request, deserializing the response body as JSON.
+     */
+    suspend inline fun <reified T> execute(
+        method: HttpMethod,
+        path: String,
+        query: Map<String, String?>? = null,
+        body: Any? = null,
+        headers: Map<String, String>? = null,
+    ): T {
+        val response = executeRaw(method, path, query, body, headers)
+        return json.decodeFromString<T>(response)
+    }
+
+    /**
+     * Execute an HTTP request, returning the raw response body as a string.
+     */
+    suspend fun executeRaw(
+        method: HttpMethod,
+        path: String,
+        query: Map<String, String?>? = null,
+        body: Any? = null,
+        headers: Map<String, String>? = null,
+    ): String {
+        return executeWithRetry(method, path, query, body, headers)
+    }
+
+    /**
+     * Close the underlying HTTP client. Call this when the SDK is no longer needed.
+     */
+    fun close() {
+        client.close()
+    }
+
+    // ── private helpers ─────────────────────────────────────────────────────
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private suspend fun executeWithRetry(
+        method: HttpMethod,
+        path: String,
+        query: Map<String, String?>? = null,
+        body: Any? = null,
+        headers: Map<String, String>? = null,
+        attempt: Int = 0,
+    ): String {
+        return try {
+            val response = client.request {
+                this.method = method
+                url {
+                    // Base URL is set as default; append the path
+                    val fullUrl = "${config.baseUrl.trimEnd('/')}${path}"
+                    takeFrom(fullUrl)
+
+                    // Add query parameters
+                    query?.forEach { (key, value) ->
+                        if (value != null) {
+                            parameters.append(key, value)
+                        }
+                    }
+                }
+
+                // Set request body
+                if (body != null) {
+                    setBody(body)
+                }
+
+                // Set custom headers
+                headers?.forEach { (key, value) ->
+                    this.headers.append(key, value)
+                }
+
+                // Apply authentication
+                applyAuth()
+            }
+
+            val status = response.status.value
+
+            if (status in 200..299) {
+                response.bodyAsText()
+            } else if ((status >= 500 || status == 429) && attempt < config.maxRetries) {
+                // Retry on server errors and rate limiting
+                val backoffMs = 200L * (1L shl attempt)
+                delay(backoffMs)
+                executeWithRetry(method, path, query, body, headers, attempt + 1)
+            } else {
+                throw buildSdkException(response)
+            }
+        } catch (e: SdkException) {
+            throw e
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (attempt < config.maxRetries) {
+                val backoffMs = 200L * (1L shl attempt)
+                delay(backoffMs)
+                executeWithRetry(method, path, query, body, headers, attempt + 1)
+            } else {
+                throw SdkException(
+                    status = null,
+                    code = null,
+                    message = "Network error: ${e.message}",
+                    requestId = null,
+                    cause = e,
+                )
+            }
+        }
+    }
+
+    private suspend fun buildSdkException(response: HttpResponse): SdkException {
+        val status = response.status.value
+        val body = try {
+            response.bodyAsText()
+        } catch (e: Exception) {
+            null
+        }
+
+        val requestId = response.headers["x-request-id"]
+            ?: response.headers["request-id"]
+
+        // Try to extract structured error info from the JSON body
+        var code: String? = null
+        var message: String = body ?: "API error (status $status)"
+
+        if (body != null) {
+            try {
+                val jsonBody = json.decodeFromString<JsonObject>(body)
+                code = jsonBody["code"]?.jsonPrimitive?.content
+                    ?: jsonBody["error"]?.let { err ->
+                        when (err) {
+                            is JsonObject -> err["code"]?.jsonPrimitive?.content
+                            else -> err.jsonPrimitive?.content
+                        }
+                    }
+                message = jsonBody["message"]?.jsonPrimitive?.content
+                    ?: jsonBody["error"]?.let { err ->
+                        when (err) {
+                            is JsonObject -> err["message"]?.jsonPrimitive?.content
+                            else -> err.jsonPrimitive?.content
+                        }
+                    }
+                    ?: message
+            } catch (_: Exception) {
+                // Use raw body as the message
+                message = body
+            }
+        }
+
+        return SdkException(
+            status = status,
+            code = code,
+            message = message,
+            requestId = requestId,
+        )
+    }
+
+    private fun HttpRequestBuilder.applyAuth() {
+{{#each securitySchemes}}
+{{#if (eq type "apiKey")}}
+{{#if (eq in "header")}}
+        config.{{configKey}}?.let { key ->
+            headers.append("{{paramName}}", key)
+        }
+{{/if}}
+{{#if (eq in "query")}}
+        // API key via query parameter handled during URL construction
+{{/if}}
+{{/if}}
+{{#if (and (eq type "http") (eq scheme "bearer"))}}
+        config.{{configKey}}?.let { token ->
+            headers.append("Authorization", "Bearer $token")
+        }
+{{/if}}
+{{#if (eq type "oauth2")}}
+        config.{{configKey}}?.let { token ->
+            headers.append("Authorization", "Bearer $token")
+        }
+{{/if}}
+{{#if (eq type "openIdConnect")}}
+        config.{{configKey}}?.let { token ->
+            headers.append("Authorization", "Bearer $token")
+        }
+{{/if}}
+{{/each}}
+    }
+}

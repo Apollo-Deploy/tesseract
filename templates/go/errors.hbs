@@ -1,0 +1,38 @@
+package {{pkgName}}
+
+import "fmt"
+
+// SDKError represents an error returned by the API.
+type SDKError struct {
+	// Status is the HTTP status code.
+	Status int
+	// Code is a machine-readable error code from the API.
+	Code string
+	// RequestID is the unique identifier for the request (for support).
+	RequestID string
+	// Message is a human-readable error description.
+	Message string
+}
+
+// Error implements the error interface.
+func (e *SDKError) Error() string {
+	if e.Code != "" {
+		return fmt.Sprintf("[%d] %s: %s", e.Status, e.Code, e.Message)
+	}
+	return fmt.Sprintf("[%d] %s", e.Status, e.Message)
+}
+
+// Unwrap returns nil since SDKError is the root cause.
+func (e *SDKError) Unwrap() error {
+	return nil
+}
+
+// NewSDKError creates a new SDKError.
+func NewSDKError(status int, code, message, requestID string) *SDKError {
+	return &SDKError{
+		Status:    status,
+		Code:      code,
+		Message:   message,
+		RequestID: requestID,
+	}
+}

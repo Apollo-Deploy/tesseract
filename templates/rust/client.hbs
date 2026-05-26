@@ -1,0 +1,114 @@
+use crate::transport::{Transport, TransportConfig};
+{{#each groups}}
+use crate::api::{{snakeCase fileName}}::{{interfaceName}};
+{{/each}}
+use std::time::Duration;
+
+/// Configuration for the {{title}} API client.
+#[derive(Debug, Clone)]
+pub struct ClientConfig {
+    /// Base URL for the API.
+    pub base_url: String,
+{{#each securitySchemes}}
+{{#if (eq type "apiKey")}}
+    /// API key for the `{{name}}` security scheme.
+    pub {{snakeCase configKey}}: Option<String>,
+{{/if}}
+{{#if (and (eq type "http") (eq scheme "bearer"))}}
+    /// Bearer token for the `{{name}}` security scheme.
+    pub {{snakeCase configKey}}: Option<String>,
+{{/if}}
+{{#if (eq type "oauth2")}}
+    /// OAuth2 access token for the `{{name}}` security scheme.
+    pub {{snakeCase configKey}}: Option<String>,
+{{/if}}
+{{#if (eq type "openIdConnect")}}
+    /// OpenID Connect access token for the `{{name}}` security scheme.
+    pub {{snakeCase configKey}}: Option<String>,
+{{/if}}
+{{/each}}
+    /// Request timeout.
+    pub timeout: Duration,
+    /// Maximum number of retry attempts.
+    pub max_retries: u32,
+}
+
+impl Default for ClientConfig {
+    fn default() -> Self {
+        Self {
+            base_url: "{{baseUrl}}".to_string(),
+{{#each securitySchemes}}
+            {{snakeCase configKey}}: None,
+{{/each}}
+            timeout: Duration::from_secs(15),
+            max_retries: 3,
+        }
+    }
+}
+
+/// Primary API client for {{title}}.
+///
+/// Provides access to all domain-specific API groups.
+pub struct Client {
+    transport: Transport,
+{{#each groups}}
+    /// {{#if description}}{{description}}{{else}}{{interfaceName}} operations.{{/if}}
+    pub {{snakeCase name}}: {{interfaceName}},
+{{/each}}
+}
+
+impl Client {
+    /// Create a new {{title}} API client with the given configuration.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use {{crateName}}::Client;
+    /// use {{crateName}}::ClientConfig;
+    ///
+    /// let config = ClientConfig {
+{{#each securitySchemes}}
+{{#if (or (eq type "apiKey") (and (eq type "http") (eq scheme "bearer")))}}
+    ///     {{snakeCase configKey}}: Some("your-key".to_string()),
+{{/if}}
+{{/each}}
+    ///     ..Default::default()
+    /// };
+    /// let client = Client::new(config);
+    /// ```
+    pub fn new(config: ClientConfig) -> Self {
+        let mut transport_config = TransportConfig {
+            base_url: config.base_url,
+{{#each securitySchemes}}
+            {{snakeCase configKey}}: config.{{snakeCase configKey}},
+{{/each}}
+            timeout: config.timeout,
+            max_retries: config.max_retries,
+        };
+
+        let transport = Transport::new(transport_config);
+
+        Self {
+{{#each groups}}
+            {{snakeCase name}}: {{interfaceName}}::new(transport.clone()),
+{{/each}}
+            transport,
+        }
+    }
+
+    /// Return a reference to the underlying transport layer.
+    pub fn transport(&self) -> &Transport {
+        &self.transport
+    }
+}
+
+impl std::fmt::Debug for Client {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Client")
+            .field("transport", &"<Transport>")
+{{#each groups}}
+            .field("{{snakeCase name}}", &"<{{interfaceName}}>")
+{{/each}}
+            .finish()
+    }
+}

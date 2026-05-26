@@ -1,0 +1,110 @@
+# frozen_string_literal: true
+
+require_relative "../transport"
+require_relative "../errors"
+
+module {{pascalCase meta.clientName}}
+  # {{#if description}}{{description}}{{else}}{{name}} API domain{{/if}}
+  class {{pascalCase name}}
+    # @return [Transport]
+    attr_reader :transport
+
+    # @param transport [Transport]
+    def initialize(transport)
+      @transport = transport
+    end
+
+{{#each operations}}
+    {{#if deprecated}}
+    # @deprecated {{#if deprecationMessage}}{{deprecationMessage}}{{else}}Use a replacement method.{{/if}}
+    {{/if}}
+    {{#if (or summary description)}}
+    # {{#if summary}}{{summary}}{{#if description}} — {{description}}{{/if}}{{else}}{{description}}{{/if}}
+    {{/if}}
+    {{#if pathParams.length}}
+    # @param {{#each pathParams}}{{snakeCase name}} [{{type}}]{{#unless @last}}, {{/unless}}{{/each}}
+    {{/if}}
+    {{#if requestBody}}
+    # @param body [{{requestBody.type}}{{#unless requestBody.required}}, nil{{/unless}}] request body
+    {{/if}}
+    {{#if (or queryParams.length queryType)}}
+    # @param query [Hash, nil] query parameters
+    {{/if}}
+    {{#if (and headerParams.length headerType)}}
+    # @param headers [Hash, nil] extra request headers
+    {{/if}}
+    {{#if (and cookieParams.length cookieType)}}
+    # @param cookies [Hash, nil] cookie values
+    {{/if}}
+    {{#if timeoutMs}}
+    # @param timeout [Integer, nil] per-request timeout override (seconds)
+    {{/if}}
+    # @raise [{{pascalCase ../meta.clientName}}::SDKError]
+    # @return [{{responseType}}]
+    def {{snakeCase name}}({{#if pathParams.length}}{{#each pathParams}}{{snakeCase name}}:{{#if (or ../requestBody (or ../queryType ../queryParams.length) (or ../headerType ../cookieType))}}, {{/if}}{{/each}}{{/if}}{{#if requestBody}}body: nil{{#if (or ../queryType ../queryParams.length (or ../headerType ../cookieType))}}, {{/if}}{{/if}}{{#if (or queryParams.length queryType)}}query: nil{{#if (or ../headerType ../cookieType)}}, {{/if}}{{/if}}{{#if (and headerParams.length headerType)}}headers: {}{{#if ../cookieType}}, {{/if}}{{/if}}{{#if (and cookieParams.length cookieType)}}cookies: nil{{/if}})
+      {{#if (or pathParams.length headerParams.length cookieParams.length)}}
+      # Build request headers
+      request_headers = {}
+      {{#if (and headerParams.length headerType)}}
+      {{#each headerParams}}
+      request_headers["{{originalName}}"] = headers[:{{snakeCase name}}].to_s if headers[:{{snakeCase name}}]
+      {{/each}}
+      {{/if}}
+      {{#if (and cookieParams.length cookieType)}}
+      if cookies
+        cookie_pairs = []
+        {{#each cookieParams}}
+        cookie_pairs << "{{originalName}}=#{::URI.encode_www_form_component(cookies[:{{snakeCase name}}].to_s)}" if cookies[:{{snakeCase name}}]
+        {{/each}}
+        request_headers["Cookie"] = cookie_pairs.join("; ") unless cookie_pairs.empty?
+      end
+      {{/if}}
+      {{/if}}
+
+      {{#if pathParams.length}}
+      # Path parameter substitution
+      path_params = {
+        {{#each pathParams}}
+        {{originalName}}: {{snakeCase name}},
+        {{/each}}
+      }
+      {{/if}}
+
+      {{#if queryParams.length}}
+      # Query parameters
+      query_params = {}
+      {{#each queryParams}}
+      query_params["{{originalName}}"] = query[:{{snakeCase name}}] if query && query.key?(:{{snakeCase name}})
+      {{/each}}
+      query_params = nil if query_params.empty?
+      {{else if queryType}}
+      # Free-form query parameters
+      query_params = query
+      {{/if}}
+
+      transport.request(
+        method: :{{httpMethod}},
+        path: "{{path}}",
+        {{#if pathParams.length}}
+        path_params: path_params,
+        {{/if}}
+        {{#if requestBody}}
+        body: body,
+        {{/if}}
+        {{#if (or queryParams.length queryType)}}
+        query: query_params,
+        {{/if}}
+        {{#if (or (and headerParams.length headerType) (and cookieParams.length cookieType))}}
+        headers: request_headers,
+        {{/if}}
+        {{#if (neq requestBody.contentType "application/json")}}
+        {{#if requestBody.contentType}}
+        content_type: "{{requestBody.contentType}}",
+        {{/if}}
+        {{/if}}
+      )
+    end
+
+{{/each}}
+  end
+end

@@ -1,0 +1,105 @@
+# {{title}}
+
+{{#if description}}{{description}}{{/if}}
+
+{{#unless description}}An auto-generated Kotlin SDK for the {{title}} API.{{/unless}}
+
+## Installation
+
+### Gradle
+
+Add the dependency to your `build.gradle.kts`:
+
+```kotlin
+repositories {
+    mavenCentral()
+    // If publishing to a private repository, add it here.
+}
+
+dependencies {
+    implementation("{{groupId}}:{{artifactId}}:{{#if packageVersion}}{{packageVersion}}{{else}}0.1.0{{/if}}")
+}
+```
+
+### Maven
+
+```xml
+<dependency>
+    <groupId>{{groupId}}</groupId>
+    <artifactId>{{artifactId}}</artifactId>
+    <version>{{#if packageVersion}}{{packageVersion}}{{else}}0.1.0{{/if}}</version>
+</dependency>
+```
+
+## Quick Start
+
+```kotlin
+import {{packageName}}.Client
+import {{packageName}}.ClientConfig
+import kotlinx.coroutines.runBlocking
+
+fun main() = runBlocking {
+    val config = ClientConfig(
+{{#each securitySchemes}}
+{{#if (eq type "apiKey")}}
+        {{configKey}} = "your-api-key",
+{{/if}}
+{{#if (and (eq type "http") (eq scheme "bearer"))}}
+        {{configKey}} = "your-bearer-token",
+{{/if}}
+{{/each}}
+    )
+
+    val client = Client(config)
+
+{{#each groups}}
+{{#if @first}}
+    // val result = client.{{name}}.someOperation()
+{{/if}}
+{{/each}}
+}
+```
+
+## API Reference
+
+{{#each groups}}
+### {{interfaceName}}
+
+{{#if description}}
+{{description}}
+{{/if}}
+
+| Method | HTTP | Description |
+|--------|------|-------------|
+{{#each operations}}
+| `{{name}}()` | `{{httpMethod}}` | {{#if summary}}{{summary}}{{else}}—{{/if}} |
+{{/each}}
+
+{{/each}}
+
+## Error Handling
+
+All API methods throw `SdkException` on failure. The exception contains:
+
+- `status`: HTTP status code (for API errors)
+- `code`: Machine-readable error code (if available)
+- `message`: Human-readable error message
+- `requestId`: Server-assigned request ID for support
+
+```kotlin
+try {
+    val result = client.users.getUser("user-123")
+    println("Success: $result")
+} catch (e: SdkException) {
+    when {
+        e.isClientError() -> println("Bad request: ${e.message}")
+        e.isServerError() -> println("Server error (${e.status}): ${e.message}")
+        e.isNetworkError() -> println("Network error: ${e.message}")
+        else -> println("Error: ${e.message}")
+    }
+}
+```
+
+## License
+
+MIT

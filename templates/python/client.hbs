@@ -1,0 +1,102 @@
+"""{{title}} SDK Client"""
+
+from typing import Optional, Dict, Any, List, Callable, Union
+import httpx
+from .transport import create_transport, SDKTransport, RequestOptions
+{{#each groups}}
+from .resources.{{fileName}} import {{interfaceName}}
+{{/each}}
+
+{{#if hasSSE}}
+# SSE support requires the sseclient-py package:
+#   pip install sseclient-py>=1.8.0
+{{/if}}
+
+class {{clientName}}ClientConfig:
+    """Configuration for {{title}} client."""
+
+    def __init__(
+        self,
+        base_url: str = "{{baseUrl}}",
+{{#each securitySchemes}}
+{{#if (eq type "apiKey")}}
+        {{configKey}}: Optional[str] = None,
+{{/if}}
+{{#if (and (eq type "http") (eq scheme "bearer"))}}
+        {{configKey}}: Optional[str] = None,
+{{/if}}
+{{#if (eq type "oauth2")}}
+        {{configKey}}: Optional[str] = None,
+{{/if}}
+{{#if (eq type "openIdConnect")}}
+        {{configKey}}: Optional[str] = None,
+{{/if}}
+{{/each}}
+        timeout_ms: int = 15000,
+        retries: int = 3,
+        default_headers: Optional[Dict[str, str]] = None,
+        on_request: Optional[Callable] = None,
+        on_response: Optional[Callable] = None,
+        on_error: Optional[Callable] = None,
+    ):
+        self.base_url = base_url
+{{#each securitySchemes}}
+        self.{{configKey}} = {{configKey}}
+{{/each}}
+        self.timeout_ms = timeout_ms
+        self.retries = retries
+        self.default_headers = default_headers or {}
+        self.on_request = on_request
+        self.on_response = on_response
+        self.on_error = on_error
+
+
+class {{clientName}}Client:
+    """{{title}} SDK Client"""
+
+    def __init__(self, config: Optional[{{clientName}}ClientConfig] = None):
+        self.config = config or {{clientName}}ClientConfig()
+        self._transport = create_transport(
+            base_url=self.config.base_url,
+{{#each securitySchemes}}
+            {{configKey}}=self.config.{{configKey}},
+{{/each}}
+            timeout_ms=self.config.timeout_ms,
+            retries=self.config.retries,
+            default_headers=self.config.default_headers,
+            on_request=self.config.on_request,
+            on_response=self.config.on_response,
+            on_error=self.config.on_error,
+        )
+{{#each groups}}
+        self.{{snakeCase name}} = {{interfaceName}}(self._transport)
+{{/each}}
+
+
+def create_{{snakeCase clientName}}_client(
+    base_url: str = "{{baseUrl}}",
+{{#each securitySchemes}}
+{{#if (eq type "apiKey")}}
+    {{configKey}}: Optional[str] = None,
+{{/if}}
+{{#if (and (eq type "http") (eq scheme "bearer"))}}
+    {{configKey}}: Optional[str] = None,
+{{/if}}
+{{#if (eq type "oauth2")}}
+    {{configKey}}: Optional[str] = None,
+{{/if}}
+{{#if (eq type "openIdConnect")}}
+    {{configKey}}: Optional[str] = None,
+{{/if}}
+{{/each}}
+    **kwargs,
+) -> {{clientName}}Client:
+    """Create a new {{title}} SDK client."""
+    config = {{clientName}}ClientConfig(
+        base_url=base_url,
+{{#each securitySchemes}}
+        {{configKey}}={{configKey}},
+{{/each}}
+        **kwargs,
+    )
+    return {{clientName}}Client(config)

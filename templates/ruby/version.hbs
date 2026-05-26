@@ -1,0 +1,5 @@
+# frozen_string_literal: true
+
+module {{pascalCase snakeModule}}
+  VERSION = "{{#if meta.packageVersion}}{{meta.packageVersion}}{{else}}{{meta.version}}{{/if}}"
+end

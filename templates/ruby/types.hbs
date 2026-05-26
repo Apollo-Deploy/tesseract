@@ -1,0 +1,126 @@
+# frozen_string_literal: true
+
+module {{pascalCase meta.clientName}}
+{{#each schemas}}
+{{#if isEnum}}
+  # {{#if description}}{{description}}{{else}}Enum for {{name}} values.{{/if}}
+  module {{pascalCase name}}
+    {{#each enumValues}}
+    {{#if (isString this)}}
+    {{upperCase (snakeCase this)}} = "{{this}}"
+    {{else}}
+    {{upperCase name}}_{{this}} = {{this}}
+    {{/if}}
+    {{/each}}
+
+    # All valid enum values.
+    # @return [Array]
+    ALL = [
+      {{#each enumValues}}
+      {{#if (isString this)}}
+      {{upperCase (snakeCase this)}},
+      {{else}}
+      {{upperCase ../name}}_{{this}},
+      {{/if}}
+      {{/each}}
+    ].freeze
+
+    # Check if a value is valid for this enum.
+    # @param value [String, Integer]
+    # @return [Boolean]
+    def self.valid?(value)
+      ALL.include?(value)
+    end
+  end
+
+{{else if isTypeAlias}}
+  {{#if unionMembers}}
+  # {{pascalCase name}} — type alias for: {{#each unionMembers}}{{this}}{{#unless @last}} | {{/unless}}{{/each}}
+  {{pascalCase name}} = Class.new
+  {{else}}
+  # {{pascalCase name}} — schema type alias
+  {{pascalCase name}} = Class.new
+  {{/if}}
+
+{{else if isUnionType}}
+  # {{pascalCase name}} — union type: {{#each unionMembers}}{{this}}{{#unless @last}} | {{/unless}}{{/each}}
+  module {{pascalCase name}}
+    # Union members are typed schemas. Use `is_a?` or pattern matching at runtime.
+    {{#each unionMembers}}
+    # @see {{this}}
+    {{/each}}
+  end
+
+{{else}}
+  {{#if (and properties.length (not isUnionType))}}
+  # {{#if description}}{{description}}{{else}}Schema type: {{name}}{{/if}}
+  class {{pascalCase name}}
+    {{#each properties}}
+    # @return [{{type}}{{#if nullable}}, nil{{/if}}]{{#if description}} {{description}}{{/if}}
+    attr_accessor :{{snakeCase name}}
+    {{/each}}
+
+    # @param {{#each properties}}{{snakeCase name}} [{{type}}{{#if nullable}}, nil{{/if}}]{{#unless @last}}, {{/unless}}{{/each}}
+    def initialize({{#each properties}}{{snakeCase name}}: {{^required}}nil{{/required}}{{#unless @last}}, {{/unless}}{{/each}})
+      {{#each properties}}
+      @{{snakeCase name}} = {{snakeCase name}}
+      {{/each}}
+    end
+
+    # @return [Hash] a hash representation of this object
+    def to_h
+      {
+        {{#each properties}}
+        {{#if (eq type "DateTime")}}
+        {{snakeCase name}}: @{{snakeCase name}}&.iso8601,
+        {{else}}
+        {{snakeCase name}}: @{{snakeCase name}},
+        {{/if}}
+        {{/each}}
+      }.compact
+    end
+
+    # Create an instance from a parsed JSON hash.
+    # @param attributes [Hash]
+    # @return [{{pascalCase name}}]
+    def self.from_json(attributes)
+      return nil unless attributes.is_a?(Hash)
+
+      new(
+        {{#each properties}}
+        {{snakeCase name}}: attributes["{{snakeCase name}}"] || attributes["{{originalName}}"] || attributes[:{{snakeCase name}}],
+        {{/each}}
+      )
+    end
+  end
+
+  {{else}}
+  # {{#if description}}{{description}}{{else}}Schema type without properties: {{name}}{{/if}}
+  class {{pascalCase name}}
+    # @return [Hash] raw attributes
+    attr_reader :attributes
+
+    # @param attributes [Hash]
+    def initialize(attributes = {})
+      @attributes = attributes
+    end
+
+    # @return [Hash]
+    def to_h
+      @attributes.dup
+    end
+
+    # Create an instance from a parsed JSON hash.
+    # @param attributes [Hash]
+    # @return [{{pascalCase name}}]
+    def self.from_json(attributes)
+      return nil unless attributes.is_a?(Hash)
+
+      new(attributes)
+    end
+  end
+
+  {{/if}}
+{{/if}}
+{{/each}}
+end

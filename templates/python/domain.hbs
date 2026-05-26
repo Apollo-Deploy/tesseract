@@ -1,0 +1,139 @@
+"""{{interfaceName}} operations."""
+
+from typing import Optional, Dict, Any, List
+{{#if imports.length}}
+from ..types import {{#each imports}}{{this}}{{#unless @last}}, {{/unless}}{{/each}}
+{{/if}}
+from ..transport import SDKTransport, RequestOptions
+from ..errors import SDKError
+
+
+class {{interfaceName}}:
+    """{{#if description}}{{description}}{{else}}{{interfaceName}} API operations{{/if}}"""
+
+    def __init__(self, transport: SDKTransport):
+        self._transport = transport
+
+{{#each operations}}
+{{#if isEventStream}}
+    def {{snakeCase name}}(
+        self,
+{{#each pathParams}}
+        {{name}}: str,
+{{/each}}
+{{#if (and queryType (not queryParams.length))}}
+        *,
+        query: Optional[Dict[str, Any]] = None,
+{{/if}}
+{{#if queryParams.length}}
+        *,
+{{#each queryParams}}
+        {{name}}: Optional[{{pythonType type}}] = None,
+{{/each}}
+{{/if}}
+        options: Optional[RequestOptions] = None,
+    ):
+        """{{#if summary}}{{summary}}{{#if description}} - {{description}}{{/if}}{{else if description}}{{description}}{{/if}} (SSE stream)
+        """
+{{#if deprecated}}
+        # @deprecated {{deprecationMessage}}
+{{/if}}
+        # Build path with parameter substitution
+        _path = "{{path}}"
+{{#each pathParams}}
+        _path = _path.replace("{" + "{{originalName}}" + "}", str({{name}}))
+{{/each}}
+
+        # Build query parameters
+        _query: Dict[str, Any] = {}
+{{#each queryParams}}
+        if query is not None and hasattr(query, "{{name}}") and getattr(query, "{{name}}") is not None:
+            _query["{{originalName}}"] = getattr(query, "{{name}}")
+{{/each}}
+
+        response = self._transport.request(
+            method="{{httpMethod}}",
+            path=_path,
+            query=_query if _query else None,
+            options=options,
+        )
+        return response.json()
+
+{{else}}
+    def {{snakeCase name}}(
+        self,
+{{#each pathParams}}
+        {{name}}: str,
+{{/each}}
+{{#if requestBody}}
+        body: {{pythonType requestBody.type}},
+{{/if}}
+{{#if (and queryType (not queryParams.length))}}
+        *,
+        query: Optional[Dict[str, Any]] = None,
+{{/if}}
+{{#if queryParams.length}}
+        *,
+{{#each queryParams}}
+        {{name}}: Optional[{{pythonType type}}] = None,
+{{/each}}
+{{/if}}
+{{#if headerType}}
+        headers: Optional[{{pythonType headerType}}] = None,
+{{/if}}
+        options: Optional[RequestOptions] = None,
+    ) -> {{pythonType responseType}}:
+        """{{#if summary}}{{summary}}{{#if description}} - {{description}}{{/if}}{{else if description}}{{description}}{{/if}}
+        """
+{{#if deprecated}}
+        # @deprecated {{deprecationMessage}}
+{{/if}}
+        # Build path with parameter substitution
+        _path = "{{path}}"
+{{#each pathParams}}
+        _path = _path.replace("{" + "{{originalName}}" + "}", str({{name}}))
+{{/each}}
+
+        # Build query parameters
+        _query: Dict[str, Any] = {}
+{{#each queryParams}}
+        if {{name}} is not None:
+            _query["{{originalName}}"] = {{name}}
+{{/each}}
+{{#if queryType}}
+        if query is not None:
+            _items = query.__dict__.items() if hasattr(query, "__dict__") else []
+            for k, v in _items:
+                if v is not None:
+                    _query[k] = v
+{{/if}}
+
+        # Build headers
+        _headers: Dict[str, str] = {}
+{{#each headerParams}}
+        if headers is not None and hasattr(headers, "{{name}}") and getattr(headers, "{{name}}") is not None:
+            _headers["{{originalName}}"] = str(getattr(headers, "{{name}}"))
+{{/each}}
+
+{{#if (hasRequestBody this)}}
+        _content_type = "{{requestBody.contentType}}"
+{{/if}}
+
+        response = self._transport.request(
+            method="{{httpMethod}}",
+            path=_path,
+{{#if (or queryParams.length queryType)}}
+            query=_query if _query else None,
+{{/if}}
+{{#if (hasRequestBody this)}}
+            body=body,
+            content_type=_content_type,
+{{/if}}
+{{#if (or headerParams.length (hasRequestBody this))}}
+            options=RequestOptions(headers=_headers if _headers else None),
+{{/if}}
+        )
+        return response.json()
+
+{{/if}}
+{{/each}}

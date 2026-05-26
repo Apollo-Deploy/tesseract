@@ -1,0 +1,20 @@
+"""
+{{title}} Python SDK
+"""
+
+from .client import create_{{snakeCase clientName}}_client, {{clientName}}Client
+from .errors import SDKError
+from .resources import (
+{{#each groups}}
+    {{interfaceName}},
+{{/each}}
+)
+
+__all__ = [
+    "create_{{snakeCase clientName}}_client",
+    "{{clientName}}Client",
+    "SDKError",
+{{#each groups}}
+    "{{interfaceName}}",
+{{/each}}
+]

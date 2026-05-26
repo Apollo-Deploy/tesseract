@@ -1,0 +1,183 @@
+namespace {{namespace}}.Api;
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+
+/// <summary>
+/// Provides access to {{name}} API operations.
+/// </summary>
+public class {{interfaceName}}
+{
+    private readonly Transport _transport;
+
+    /// <summary>
+    /// Creates a new {{interfaceName}} instance.
+    /// </summary>
+    public {{interfaceName}}(Transport transport)
+    {
+        _transport = transport;
+    }
+
+{{#each operations}}
+{{#if isEventStream}}
+    /// <summary>
+    {{#if summary}}
+    /// {{summary}}
+    {{/if}}
+    {{#if description}}
+    /// {{description}}
+    {{/if}}
+    {{#if deprecated}}
+    /// [Obsolete] {{#if deprecationMessage}}{{deprecationMessage}}{{/if}}
+    {{/if}}
+    /// </summary>
+{{#if deprecated}}
+    [Obsolete({{#if deprecationMessage}}"{{deprecationMessage}}"{{/if}})]
+{{/if}}
+    public async IAsyncEnumerable<string> {{pascalCase name}}Async(
+{{#each pathParams}}
+        {{type}}{{#if (not required)}}?{{/if}} {{name}},
+{{/each}}
+{{#if requestBody}}
+        {{requestBody.type}}{{#if (not requestBody.required)}}?{{/if}} body,
+{{/if}}
+{{#if queryType}}
+        {{queryType}}? query = null,
+{{/if}}
+        CancellationToken cancellationToken = default)
+    {
+        var path = $"{{path}}"
+{{#each pathParams}}
+            .Replace("{{{originalName}}}", Uri.EscapeDataString({{name}}?.ToString() ?? ""))
+{{/each}}
+        ;
+
+        var queryParams = new Dictionary<string, string>();
+{{#if queryType}}
+        if (query != null)
+        {
+            var json = JsonSerializer.Serialize(query);
+            var dict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
+            if (dict != null)
+            {
+                foreach (var (key, value) in dict)
+                {
+                    if (value.ValueKind != JsonValueKind.Null)
+                        queryParams[key] = value.ToString();
+                }
+            }
+        }
+{{/if}}
+{{#if (hasQueryParams this)}}
+{{#each queryParams}}
+        if ({{name}} != null)
+            queryParams["{{originalName}}"] = {{name}}.ToString();
+{{/each}}
+{{/if}}
+
+        var response = await _transport.StreamAsync(
+            new Transport.Request
+            {
+                Method = HttpMethod.{{httpMethod}},
+                Path = path,
+                Query = queryParams.Count > 0 ? queryParams : null,
+{{#if requestBody}}
+                Body = body,
+                ContentType = "{{requestBody.contentType}}",
+{{/if}}
+            },
+            cancellationToken);
+
+        using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var reader = new StreamReader(stream);
+
+        while (!reader.EndOfStream)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var line = await reader.ReadLineAsync(cancellationToken);
+            if (line == null) break;
+
+            // Forward raw SSE lines
+            yield return line;
+        }
+    }
+
+{{else}}
+    /// <summary>
+    {{#if summary}}
+    /// {{summary}}
+    {{/if}}
+    {{#if description}}
+    /// {{description}}
+    {{/if}}
+    {{#if deprecated}}
+    /// [Obsolete] {{#if deprecationMessage}}{{deprecationMessage}}{{/if}}
+    {{/if}}
+    /// </summary>
+{{#if deprecated}}
+    [Obsolete({{#if deprecationMessage}}"{{deprecationMessage}}"{{/if}})]
+{{/if}}
+    public async Task<{{#if responseType}}{{responseType}}{{else}}object{{/if}}> {{pascalCase name}}Async(
+{{#each pathParams}}
+        {{type}}{{#if (not required)}}?{{/if}} {{name}},
+{{/each}}
+{{#if requestBody}}
+        {{requestBody.type}}{{#if (not requestBody.required)}}?{{/if}} body,
+{{/if}}
+{{#if queryType}}
+        {{queryType}}? query = null,
+{{/if}}
+        CancellationToken cancellationToken = default)
+    {
+        var path = $"{{path}}"
+{{#each pathParams}}
+            .Replace("{{{originalName}}}", Uri.EscapeDataString({{name}}?.ToString() ?? ""))
+{{/each}}
+        ;
+
+        var queryParams = new Dictionary<string, string>();
+{{#if queryType}}
+        if (query != null)
+        {
+            var json = JsonSerializer.Serialize(query);
+            var dict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
+            if (dict != null)
+            {
+                foreach (var (key, value) in dict)
+                {
+                    if (value.ValueKind != JsonValueKind.Null)
+                        queryParams[key] = value.ToString();
+                }
+            }
+        }
+{{/if}}
+{{#if (hasQueryParams this)}}
+{{#each queryParams}}
+        if ({{name}} != null)
+            queryParams["{{originalName}}"] = {{name}}.ToString();
+{{/each}}
+{{/if}}
+
+        return await _transport.ExecuteAsync<{{#if responseType}}{{responseType}}{{else}}object{{/if}}>(
+            new Transport.Request
+            {
+                Method = HttpMethod.{{httpMethod}},
+                Path = path,
+                Query = queryParams.Count > 0 ? queryParams : null,
+{{#if requestBody}}
+                Body = body,
+                ContentType = "{{requestBody.contentType}}",
+{{/if}}
+            },
+            cancellationToken);
+    }
+
+{{/if}}
+{{/each}}
+}

@@ -1,0 +1,79 @@
+"""Generated type definitions for {{moduleName}}."""
+
+from typing import Optional, List, Dict, Any, Literal, Union
+from datetime import datetime
+from pydantic import BaseModel, Field
+
+
+# -- Pagination --------------------------------------------------
+
+class PaginationQuery(BaseModel):
+    page: Optional[int] = Field(None, description="Page number (1-indexed)")
+    limit: Optional[int] = Field(None, description="Number of items per page")
+    sort_by: Optional[str] = Field(None, description="Column name to sort by")
+    sort_order: Optional[Literal["asc", "desc"]] = Field(None, description="Sort direction")
+
+
+class PageMeta(BaseModel):
+    size: int
+    total_pages: int
+    has_more: bool
+
+
+class Page(BaseModel):
+    data: List[Any]
+    page: PageMeta
+
+
+# -- Common Responses --------------------------------------------
+
+class SuccessResponse(BaseModel):
+    success: bool
+    message: Optional[str] = None
+
+
+class MessageResponse(BaseModel):
+    message: str
+
+
+class ApiErrorEnvelope(BaseModel):
+    error: str
+    message: str
+    status: int
+    request_id: Optional[str] = None
+    timestamp: Optional[str] = None
+    path: Optional[str] = None
+    method: Optional[str] = None
+    hint: Optional[str] = None
+
+
+# -- Generated Schemas -------------------------------------------
+
+{{#each schemas}}
+{{#if (eq ownership.kind "external")}}
+{{else}}
+{{#if isEnum}}
+class {{name}}(str):
+    """{{#if description}}{{description}}{{else}}Enum for {{name}}{{/if}}"""
+{{#each enumValues}}
+    {{pascalCase this}} = "{{this}}"
+{{/each}}
+
+{{else if isUnionType}}
+{{name}} = Union[{{#each unionMembers}}{{this}}{{#unless @last}}, {{/unless}}{{/each}}]
+"""{{#if description}}{{description}}{{else}}Union type for {{name}}{{/if}}"""
+
+{{else if isTypeAlias}}
+{{name}} = {{additionalPropertiesType}}
+"""{{#if description}}{{description}}{{else}}Type alias for {{name}}{{/if}}"""
+
+{{else}}
+class {{name}}(BaseModel):
+    """{{#if description}}{{description}}{{else}}Schema for {{name}}{{/if}}"""
+{{#each properties}}
+    {{name}}: {{#if nullable}}Optional[{{/if}}{{pythonType type}}{{#if nullable}}] = None{{else}}{{#unless required}} = None{{/unless}}{{/if}}
+{{/each}}
+
+{{/if}}
+{{/if}}
+{{/each}}

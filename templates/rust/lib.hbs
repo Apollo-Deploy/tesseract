@@ -1,0 +1,85 @@
+//! {{title}}
+//!
+//! {{#if description}}{{description}}{{else}}Auto-generated Rust SDK for the {{title}} API.{{/if}}
+//!
+//! # Quick Start
+//!
+//! Add to your `Cargo.toml`:
+//!
+//! ```toml
+//! [dependencies]
+//! {{crateName}} = "{{#if packageVersion}}{{packageVersion}}{{else}}0.1.0{{/if}}"
+//! ```
+//!
+//! Then use it:
+//!
+//! ```rust,no_run
+//! use {{crateName}}::Client;
+//! use {{crateName}}::ClientConfig;
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let mut config = ClientConfig::default();
+{{#each securitySchemes}}
+{{#if (eq type "apiKey")}}
+//!     config.{{snakeCase configKey}} = Some("your-api-key".to_string());
+{{/if}}
+{{#if (and (eq type "http") (eq scheme "bearer"))}}
+//!     config.{{snakeCase configKey}} = Some("your-bearer-token".to_string());
+{{/if}}
+{{/each}}
+//!
+//!     let client = Client::new(config);
+//!
+//!     // Use domain clients
+//!     // let result = client.{{#each groups}}{{#if @first}}{{snakeCase name}}{{/if}}{{/each}}.some_method().await?;
+//!
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ## API Reference
+//!
+{{#each groups}}
+//! ### `{{interfaceName}}`
+//! {{#if description}}{{description}}{{/if}}
+//!
+{{#each operations}}
+//! - `{{snakeCase name}}()` — {{#if summary}}{{summary}}{{else}}No summary{{/if}}
+{{/each}}
+//!
+{{/each}}
+//!
+//! ## Error Handling
+//!
+//! All API methods return `Result<T, SdkError>`. The `SdkError` enum covers:
+//!
+//! - **ApiError** — server returned an error response (4xx/5xx)
+//! - **NetworkError** — request failed due to network issues
+//! - **DeserializationError** — response body could not be parsed
+//! - **ValidationError** — invalid request parameters
+//!
+//! ```rust
+//! match client.some_domain.some_method().await {
+//!     Ok(response) => println!("Success: {:?}", response),
+//!     Err(SdkError::ApiError { status, .. }) => eprintln!("API error ({}): {}", status, error),
+//!     Err(SdkError::NetworkError(e)) => eprintln!("Network error: {}", e),
+//!     Err(e) => eprintln!("Other error: {}", e),
+//! }
+//! ```
+
+pub mod client;
+pub mod transport;
+pub mod error;
+pub mod types;
+pub mod api;
+
+pub use client::*;
+pub use error::SdkError;
+
+/// Re-export API resource modules
+pub mod resources {
+{{#each groups}}
+    pub use super::api::{{snakeCase fileName}}::*;
+{{/each}}
+}

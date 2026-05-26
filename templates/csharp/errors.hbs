@@ -1,0 +1,45 @@
+namespace {{namespace}};
+
+using System;
+
+/// <summary>
+/// Represents an error returned by the API.
+/// </summary>
+public class SdkException : Exception
+{
+    /// <summary>
+    /// HTTP status code.
+    /// </summary>
+    public int Status { get; }
+
+    /// <summary>
+    /// Machine-readable error code from the API.
+    /// </summary>
+    public string? Code { get; }
+
+    /// <summary>
+    /// Unique request identifier for support.
+    /// </summary>
+    public string? RequestId { get; }
+
+    /// <summary>
+    /// Creates a new SdkException.
+    /// </summary>
+    public SdkException(int status, string? code, string message, string? requestId, Exception? innerException = null)
+        : base(message, innerException)
+    {
+        Status = status;
+        Code = code;
+        RequestId = requestId;
+    }
+
+    /// <summary>
+    /// Returns a string representation of the error.
+    /// </summary>
+    public override string ToString()
+    {
+        if (!string.IsNullOrEmpty(Code))
+            return $"[{Status}] {Code}: {Message}";
+        return $"[{Status}] {Message}";
+    }
+}

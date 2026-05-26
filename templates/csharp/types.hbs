@@ -1,0 +1,104 @@
+namespace {{namespace}};
+
+using System;
+using System.Collections.Generic;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+{{#each schemas}}
+{{#if (neq ownership.kind "external")}}
+{{#if isEnum}}
+/// <summary>
+{{#if description}}
+/// {{description}}
+{{else}}
+/// {{name}} enumeration.
+{{/if}}
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum {{name}}
+{
+{{#each enumValues}}
+    /// <summary>
+    /// {{this}} value.
+    /// </summary>
+    [JsonStringEnumMemberName("{{this}}")]
+    {{pascalCase ../name}}{{pascalCase this}},
+{{/each}}
+}
+
+{{else if isUnionType}}
+/// <summary>
+{{#if description}}
+/// {{description}}
+{{else}}
+/// {{name}} union type.
+{{/if}}
+/// </summary>
+public class {{name}}
+{
+    private readonly object _value;
+    private readonly Type _type;
+
+{{#each unionMembers}}
+    /// <summary>
+    /// Creates a {{../name}} from a {{this}} value.
+    /// </summary>
+    public {{../name}}({{this}} value)
+    {
+        _value = value!;
+        _type = typeof({{this}});
+    }
+
+{{/each}}
+
+    /// <summary>
+    /// Gets the underlying value.
+    /// </summary>
+    public object Value => _value;
+
+    /// <summary>
+    /// Attempts to get the value as the specified type.
+    /// </summary>
+    public bool TryGet<T>(out T? value)
+    {
+        if (_value is T v)
+        {
+            value = v;
+            return true;
+        }
+        value = default;
+        return false;
+    }
+}
+
+{{else}}
+/// <summary>
+{{#if description}}
+/// {{description}}
+{{else}}
+/// {{name}} schema type.
+{{/if}}
+/// </summary>
+public class {{name}}
+{
+{{#each properties}}
+    /// <summary>
+    {{#if description}}
+    /// {{description}}
+    {{/if}}
+    /// </summary>
+    [JsonPropertyName("{{name}}")]
+    {{#if (or nullable (not required))}}
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    {{/if}}
+    {{#if deprecated}}
+    [Obsolete]
+    {{/if}}
+    public {{#if (eq type "string")}}{{#if (eq format "date-time")}}DateTime{{else}}string{{/if}}{{else if (eq type "integer")}}int{{else if (eq type "number")}}double{{else if (eq type "boolean")}}bool{{else if (eq type "array")}}List<object>?{{else}}{{type}}{{/if}}{{#if (or nullable (not required))}}?{{/if}} {{pascalCase name}} { get; set; }
+{{/each}}
+}
+{{/if}}
+
+{{/if}}
+{{/each}}

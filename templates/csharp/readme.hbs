@@ -1,0 +1,76 @@
+# {{title}} .NET SDK
+
+[![NuGet](https://img.shields.io/nuget/v/{{packageName}}.svg)](https://www.nuget.org/packages/{{packageName}}/)
+
+The official .NET SDK for {{#if description}}{{description}}{{else}}the {{title}} API{{/if}}.
+
+## Installation
+
+```bash
+dotnet add package {{packageName}}
+```
+
+## Quick Start
+
+```csharp
+using {{namespace}};
+
+{{#each securitySchemes}}
+{{#if (eq type "apiKey")}}
+var config = new {{../clientName}}ClientConfig
+{
+    {{pascalCase configKey}} = "your-api-key"{{#if (and (eq type "apiKey") (eq in "header"))}}{{/if}}
+};
+{{/if}}
+{{#if (and (eq type "http") (eq scheme "bearer"))}}
+var config = new {{../clientName}}ClientConfig
+{
+    {{pascalCase configKey}} = "your-bearer-token"
+};
+{{/if}}
+{{/each}}
+{{#unless securitySchemes.length}}
+var config = new {{clientName}}ClientConfig();
+{{/unless}}
+
+var client = new {{clientName}}Client(config);
+
+{{#each groups}}
+{{#with operations.[0]}}
+// {{../interfaceName}}.{{pascalCase name}} example
+var result = await client.{{pascalCase ../name}}.{{pascalCase name}}Async({{#each ../pathParams}}"{{this}}"{{#unless @last}}, {{/unless}}{{/each}}{{#if requestBody}}{{#if ../pathParams.length}}, {{/if}}new {{requestBody.type}}(){}{{/if}});
+Console.WriteLine(result);
+{{/with}}
+{{/each}}
+```
+
+## API Reference
+
+| Domain | Description |
+|--------|-------------|
+{{#each groups}}
+| `{{interfaceName}}` | {{#if description}}{{description}}{{else}}{{name}} operations{{/if}} |
+{{/each}}
+
+## Error Handling
+
+All async methods throw `SdkException` on API errors. Use try-catch to handle errors:
+
+```csharp
+try
+{
+    var result = await client.{{#each groups}}{{#if @first}}{{pascalCase name}}{{/if}}{{/each}}.{{#each groups}}{{#if @first}}{{#with operations.[0]}}{{pascalCase name}}Async(){{/with}}{{/if}}{{/each}};
+}
+catch (SdkException ex)
+{
+    Console.WriteLine($"Status: {ex.Status}, Code: {ex.Code}, RequestId: {ex.RequestId}");
+}
+```
+
+## Requirements
+
+- .NET 8.0 or later
+
+## License
+
+{{#if license}}{{license}}{{else}}MIT{{/if}}

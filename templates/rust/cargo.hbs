@@ -1,0 +1,22 @@
+[package]
+name = "{{crateName}}"
+version = "{{#if packageVersion}}{{packageVersion}}{{else}}0.1.0{{/if}}"
+edition = "2021"
+description = "{{#if description}}{{description}}{{else}}Rust SDK for {{title}}{{/if}}"
+license = "MIT"
+repository = "https://github.com/{{#if packageName}}{{packageName}}{{else}}example/{{crateName}}{{/if}}"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1", features = ["full"] }
+thiserror = "2"
+url = "2"
+{{#if hasSSE}}
+futures-core = "0.3"
+tokio-stream = "0.1"
+{{/if}}
+
+[dev-dependencies]
+tokio-test = "0.4"

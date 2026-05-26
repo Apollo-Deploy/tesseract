@@ -1,0 +1,73 @@
+package {{packageName}}
+
+import io.ktor.http.*
+import kotlinx.coroutines.*
+
+/**
+ * {{#if description}}{{description}}{{else}}{{interfaceName}} API operations.{{/if}}
+ */
+class {{interfaceName}}(
+    private val transport: Transport
+) {
+{{#each operations}}
+    {{#if summary}}
+    /**
+     * {{summary}}{{#if description}}
+     *
+     * {{description}}{{/if}}
+     */
+    {{/if}}
+    {{#if deprecated}}
+    @Deprecated(
+        message = "{{#if deprecationMessage}}{{deprecationMessage}}{{else}}This operation is deprecated.{{/if}}",
+    )
+    {{/if}}
+    suspend fun {{name}}(
+{{#each pathParams}}
+        {{name}}: {{{kotlinType type}}},
+{{/each}}
+{{#if requestBody}}
+        body: {{{requestBody.kotlinType}}},
+{{/if}}
+{{#if queryType}}
+        query: {{{kotlinType queryType}}}? = null,
+{{/if}}
+    ): {{{kotlinResponseType}}} {
+        val path = "{{path}}"{{#each pathParams}}.replace("{" + "{{name}}" + "}", {{name}}.toString()){{/each}}
+
+        {{#if (hasQueryParams this)}}
+        val queryMap = mutableMapOf<String, String?>()
+        {{#each _queryParams}}
+        queryMap["{{originalName}}"] = null // TODO: extract from typed query if available
+        {{/each}}
+        {{else if queryType}}
+        val queryMap: Map<String, String?>? = null // TODO: serialize query type
+        {{else}}
+        val queryMap: Map<String, String?>? = null
+        {{/if}}
+
+        {{#if (or (hasRequestBody this) (needsRequestHeaders this))}}
+        val headers = mutableMapOf<String, String>()
+        {{#if (hasRequestBody this)}}
+        {{#if (and (neq requestBody.contentType "application/json") (neq requestBody.contentType "multipart/form-data"))}}
+        headers["Content-Type"] = "{{requestBody.contentType}}"
+        {{/if}}
+        {{/if}}
+        {{#each headerParams}}
+        // TODO: inject header param '{{originalName}}' from header options
+        {{/each}}
+        {{else}}
+        val headers: Map<String, String>? = null
+        {{/if}}
+
+        return transport.execute<{{{kotlinResponseType}}}>(
+            method = HttpMethod.{{httpMethod}},
+            path = path,
+            query = queryMap,
+            body = {{#if requestBody}}body{{else}}null{{/if}},
+            headers = headers{{#unless (or (hasRequestBody this) (needsRequestHeaders this))}}{{/unless}},
+        )
+    }
+
+{{/each}}
+}
