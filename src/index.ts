@@ -8,6 +8,13 @@ import { intake } from "./pipeline/intake.js";
 import { enrich } from "./pipeline/enrich.js";
 import { resolveConfig } from "./types/config.js";
 import { TypeScriptAdapter } from "./adapters/typescript/index.js";
+import { PythonAdapter } from "./adapters/python/index.js";
+import { RubyAdapter } from "./adapters/ruby/index.js";
+import { PHPAdapter } from "./adapters/php/index.js";
+import { GoAdapter } from "./adapters/go/index.js";
+import { RustAdapter } from "./adapters/rust/index.js";
+import { KotlinAdapter } from "./adapters/kotlin/index.js";
+import { CSharpAdapter } from "./adapters/csharp/index.js";
 import type { TesseractConfig } from "./types/config.js";
 import type { LanguageAdapter } from "./adapters/types.js";
 import { write, compare, type EmittedFile } from "./pipeline/write.js";
@@ -42,6 +49,13 @@ interface GenerationContext {
 const adapterRegistry = new Map<string, () => LanguageAdapter>();
 
 registerAdapter("typescript", () => new TypeScriptAdapter());
+registerAdapter("python", () => new PythonAdapter());
+registerAdapter("ruby", () => new RubyAdapter());
+registerAdapter("php", () => new PHPAdapter());
+registerAdapter("go", () => new GoAdapter());
+registerAdapter("rust", () => new RustAdapter());
+registerAdapter("kotlin", () => new KotlinAdapter());
+registerAdapter("csharp", () => new CSharpAdapter());
 
 export function registerAdapter(
   language: string,

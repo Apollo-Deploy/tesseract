@@ -468,22 +468,29 @@ function buildOperation(
   // Response type
   let responseType = "void";
   let statusCode = 200;
-  const successResponse = pickSuccessResponse(route.schema?.response);
-  if (successResponse) {
-    const { schema: successSchema, statusCode: sc } = successResponse;
-    statusCode = sc;
-    const rs = successSchema as Record<string, unknown>;
-    if (
-      rs.type === "null" ||
-      (rs.type === "object" && !rs.properties && !rs.$ref)
-    ) {
-      responseType = "void";
-    } else if (typeof rs.$ref !== "string" && isComplexInlineSchema(rs)) {
-      const typeName = pascalCase(name) + "Response";
-      inlineSchemas.push(jsonSchemaToDefinition(typeName, successSchema));
-      responseType = typeName;
-    } else {
-      responseType = jsonSchemaToType(successSchema);
+
+  // SDK config override: explicit returnType takes priority over schema derivation.
+  // Useful for paginated list endpoints that return a wrapper but should expose the inner array type.
+  if (route.sdk?.returnType) {
+    responseType = route.sdk.returnType;
+  } else {
+    const successResponse = pickSuccessResponse(route.schema?.response);
+    if (successResponse) {
+      const { schema: successSchema, statusCode: sc } = successResponse;
+      statusCode = sc;
+      const rs = successSchema as Record<string, unknown>;
+      if (
+        rs.type === "null" ||
+        (rs.type === "object" && !rs.properties && !rs.$ref)
+      ) {
+        responseType = "void";
+      } else if (typeof rs.$ref !== "string" && isComplexInlineSchema(rs)) {
+        const typeName = pascalCase(name) + "Response";
+        inlineSchemas.push(jsonSchemaToDefinition(typeName, successSchema));
+        responseType = typeName;
+      } else {
+        responseType = jsonSchemaToType(successSchema);
+      }
     }
   }
 

@@ -1,6 +1,6 @@
 {
   "name": "@apollo-deploy/tesseract",
-  "version": "0.8.1",
+  "version": "0.9.1",
   "type": "module",
   "description": "Manifest-first SDK generator — turns sdk-manifold/v1 manifests into production-ready TypeScript SDKs",
   "bin": {

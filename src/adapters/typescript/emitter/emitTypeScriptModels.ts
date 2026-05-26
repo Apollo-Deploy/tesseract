@@ -3,10 +3,10 @@
  */
 
 import { Project } from "ts-morph";
-import { EmittedFile } from "../../../pipeline/write";
-import { EnrichedSDKIR, SchemaDefinition } from "../../../types/ir";
-import { createEmitContext, emitSchema } from "./emitSchema";
-import { collectTypeImportStatements } from "./importCollector";
+import { EmittedFile } from "../../../pipeline/write.js";
+import { EnrichedSDKIR, SchemaDefinition } from "../../../types/ir.js";
+import { createEmitContext, emitSchema } from "./emitSchema.js";
+import { collectTypeImportStatements } from "./importCollector.js";
 
 export function emitTypeScriptModels(
   enriched: EnrichedSDKIR,

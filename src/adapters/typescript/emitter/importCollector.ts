@@ -2,7 +2,7 @@
  * Import resolution for schema dependencies.
  */
 
-import { SchemaDefinition } from "../../../types/ir";
+import { SchemaDefinition } from "../../../types/ir.js";
 
 export function collectTypeImportStatements(
   schemas: SchemaDefinition[],

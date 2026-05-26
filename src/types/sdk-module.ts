@@ -35,11 +35,11 @@ export interface SDKModuleConfig {
    *
    * @default 'stable'
    */
-  stability?: 'stable' | 'experimental' | 'internal';
+  stability?: "stable" | "experimental" | "internal";
 }
 
 /** Symbol used to store SDKModuleConfig on a decorated class. */
-export const SDK_MODULE_CONFIG = Symbol('tesseract:sdkModuleConfig');
+export const SDK_MODULE_CONFIG = Symbol("tesseract:sdkModuleConfig");
 
 /**
  * Module-level domain registry. Populated by `@SDKModule` and `sdkDomain()`.
@@ -93,7 +93,6 @@ export function SDKModule(config: SDKModuleConfig) {
   };
 }
 
-
 /**
  * SDKRouteConfig — per-route SDK options, set via `sdk` on a route definition.
  *
@@ -113,7 +112,7 @@ export interface SDKRouteConfig {
   methodName?: string;
 
   /** Request body encoding. Defaults to `'json'`. */
-  transport?: 'json' | 'multipart' | 'binary' | 'stream';
+  transport?: "json" | "multipart" | "binary" | "stream";
 
   /** Completely exclude this route from the generated SDK. */
   exclude?: boolean;
@@ -157,4 +156,25 @@ export interface SDKRouteConfig {
    * wrapper. e.g. `"SignalStreamEvent"` emits `AsyncIterable<SignalStreamEvent>`.
    */
   sseReturnType?: string;
+
+  /**
+   * Override the generated return type for this route.
+   *
+   * Useful for paginated list endpoints where the response body is a wrapper
+   * object (e.g. `{ data: T[], page: PageMeta }`) but the SDK consumer only
+   * cares about the inner array type.
+   *
+   * @example
+   * ```ts
+   * sdk: {
+   *   methodName: 'listProjects',
+   *   returnType: 'SignalProjectSchema[]',
+   * }
+   * ```
+   *
+   * The value is emitted verbatim as the `Promise<T>` type parameter.
+   * Type names are automatically collected for imports when they match
+   * known schema names.
+   */
+  returnType?: string;
 }

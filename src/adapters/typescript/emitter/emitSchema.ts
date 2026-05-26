@@ -8,8 +8,8 @@ import type {
   OptionalKind,
   PropertySignatureStructure,
 } from "ts-morph";
-import { SchemaDefinition, SchemaProperty } from "../../../types/ir";
-import { hoistInlineTypes } from "./typeHoister";
+import { SchemaDefinition, SchemaProperty } from "../../../types/ir.js";
+import { hoistInlineTypes } from "./typeHoister.js";
 
 export interface EmitContext {
   sourceFile: SourceFile;

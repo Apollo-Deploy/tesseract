@@ -12,9 +12,12 @@ import { spawnSync } from "node:child_process";
 import { generate } from "./index.js";
 import type { TesseractConfig } from "./types/config.js";
 
+import type { TargetLanguage } from "./types/ir.js";
+
 type CLIOptions = {
   input: string;
   output: string;
+  language?: TargetLanguage;
   name?: string;
   packageVersion?: string;
   npmToken?: string;
@@ -46,7 +49,7 @@ function buildConfig(opts: CLIOptions): TesseractConfig {
   return {
     input: resolve(opts.input),
     output: resolve(opts.output),
-    language: "typescript",
+    language: opts.language ?? "typescript",
     packageName: opts.name,
     packageVersion: opts.packageVersion,
     npmToken: opts.npmToken,
@@ -186,6 +189,10 @@ function createCLI(): Command {
     .requiredOption(
       "-o, --output <dir>",
       "Output directory for the generated SDK",
+    )
+    .option(
+      "-l, --language <lang>",
+      "Target language: typescript, python, ruby, php, go, rust, kotlin, csharp",
     )
     .option("-n, --name <name>", "Override the SDK package name")
     .option(

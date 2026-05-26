@@ -329,4 +329,12 @@ export interface EnrichedSDKIR extends SDKIR {
 // Target language
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type TargetLanguage = "typescript";
+export type TargetLanguage =
+  | "typescript"
+  | "python"
+  | "ruby"
+  | "php"
+  | "go"
+  | "rust"
+  | "kotlin"
+  | "csharp";
